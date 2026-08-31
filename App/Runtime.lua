@@ -260,6 +260,7 @@ function Main:GetHostView()
             view.explanation = game.lastResult.explanation
             view.fastestName, view.fastestElapsed = game.lastResult.fastestName, game.lastResult.fastestElapsed
             view.streak, view.streakBonus = answer and answer.streak or 0, answer and answer.streakBonus or 0
+            view.streakMilestones = game.lastResult.streakMilestones
         end
     end
     return view

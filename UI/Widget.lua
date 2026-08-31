@@ -27,6 +27,8 @@ local SCORE_FADE_DELAY = 1.4
 local WINNER_GAP_PIXELS = 6
 local WINNER_RISE_PIXELS = 6
 local WINNER_MAX_LINES = 2
+local TOAST_GAP_PIXELS = 6
+local TOAST_ACTIVE_STATES = { ready = true, posting = true, open = true, results = true }
 local CHOICE_COUNT = Quiz.MAX_CHOICES
 local EDIT_OUTSET = 8
 local DRAG_CLICK_GUARD = 0.2
@@ -228,6 +230,8 @@ function Widget:StartDrag()
     end
     self:StopScoreAnimation()
     self:StopWinnerAnimation()
+    self.streakPreview = nil
+    Quiz.StreakToasts:Clear()
     self:ResetPressedChoices()
     self.dragging = true
     self.frame:StartMoving()
@@ -322,6 +326,12 @@ function Widget:Create()
     self.winnerText:SetTextColor(unpack(COLORS.correct))
     self.winnerText:Hide()
     self.winnerAnimation, self.winnerRise, self.winnerFade = CreateFeedbackAnimation(self.winnerText)
+    Quiz.StreakToasts:Create(self.content, function()
+        if self.streakPreview then
+            self.streakPreview = nil
+            self:Refresh()
+        end
+    end)
     self.timer = CreateFrame("StatusBar", nil, self.questionContent)
     self.timer:EnableMouse(false)
     self.timerDuration = Quiz.ANSWER_SECONDS
@@ -384,6 +394,8 @@ function Widget:Create()
         self.timer:SetScript("OnUpdate", nil)
         self:StopScoreAnimation()
         self:StopWinnerAnimation()
+        self.streakPreview = nil
+        Quiz.StreakToasts:Clear()
         self:ResetPressedChoices()
         for _, choice in ipairs(self.choices) do
             choice.hovered = false
@@ -397,6 +409,10 @@ function Widget:SetEditing(editing)
     self:Create()
     if not editing then
         self:StopDrag()
+        if self.editing and self.streakPreview then
+            self.streakPreview = nil
+            Quiz.StreakToasts:Clear()
+        end
     end
     self.editing = editing == true
     self.frame:SetMovable(self.editing)
@@ -416,6 +432,7 @@ function Widget:RefreshTextShadows()
     ApplyTextShadow(self.prompt)
     ApplyTextShadow(self.scoreText)
     ApplyTextShadow(self.winnerText)
+    Quiz.StreakToasts:ApplyStyle(self.fontObjects)
     for _, choice in ipairs(self.choices) do
         ApplyTextShadow(choice.Text)
     end
@@ -470,6 +487,8 @@ function Widget:ApplySettings()
     self:StopDrag()
     self:StopScoreAnimation()
     self:StopWinnerAnimation()
+    self.streakPreview = nil
+    Quiz.StreakToasts:Clear()
     self:ResetPressedChoices()
     if scaleChanged then
         self.frame:SetScale(scale)
@@ -490,6 +509,8 @@ function Widget:OnDisplayChanged()
     self:StopDrag()
     self:StopScoreAnimation()
     self:StopWinnerAnimation()
+    self.streakPreview = nil
+    Quiz.StreakToasts:Clear()
     self:ResetPressedChoices()
     self.renderedWidth = nil
     self:RefreshTextShadows()
@@ -500,6 +521,28 @@ end
 function Widget:Show()
     self:Create()
     self:Refresh()
+end
+
+function Widget:SetStreakPreview(preview)
+    if preview and (IsActive() or self.dragging) then
+        return false
+    end
+    if not preview and not self.streakPreview then
+        return true
+    end
+    self:Create()
+    self.streakPreview = preview
+    Quiz.StreakToasts:Clear()
+    self:Refresh()
+    if preview then
+        if not self.frame:IsVisible() then
+            self.streakPreview = nil
+            self:Refresh()
+            return false
+        end
+        Quiz.StreakToasts:Enqueue(preview.events)
+    end
+    return true
 end
 
 function Widget:Submit(answer)
@@ -595,12 +638,23 @@ function Widget:RenderQuestion(view, changed)
     local footerGap =
         PixelUtil.GetNearestPixelSize(0, self.content:GetEffectiveScale(), WINNER_GAP_PIXELS + WINNER_RISE_PIXELS)
     local availableHeight = math.max(1, screenHeight - SCREEN_MARGIN * 2 - EDIT_OUTSET * 2)
-    local winnerHeight = math.max(MIN_TEXT_HEIGHT, winnerFontHeight) * WINNER_MAX_LINES
     local scale = self.questionScroll:GetEffectiveScale()
-    local footerHeight = PixelUtil.GetNearestPixelSize(
-        view.prompt and math.min(footerGap + winnerHeight, availableHeight / 2) or 0,
-        scale
-    )
+    local pixel = PixelUtil.GetNearestPixelSize(0, scale, 1)
+    local winnerHeight = math.max(MIN_TEXT_HEIGHT, winnerFontHeight) * WINNER_MAX_LINES
+    local winnerSlot = PixelUtil.GetNearestPixelSize(footerGap + winnerHeight, scale)
+    if winnerSlot < footerGap + winnerHeight then
+        winnerSlot = winnerSlot + pixel
+    end
+    local toastGap = PixelUtil.GetNearestPixelSize(0, scale, TOAST_GAP_PIXELS)
+    local preferredFooter = winnerSlot + toastGap + Quiz.StreakToasts:GetPreferredHeight()
+    local footerLimit = view.prompt and math.min(preferredFooter, availableHeight / 2) or 0
+    local footerHeight = PixelUtil.GetNearestPixelSize(footerLimit, scale)
+    if footerHeight > footerLimit then
+        footerHeight = math.max(0, footerHeight - pixel)
+    end
+    winnerSlot = PixelUtil.GetNearestPixelSize(winnerSlot * footerHeight / preferredFooter, scale)
+    footerGap = math.min(footerGap, winnerSlot)
+    toastGap = math.min(toastGap, footerHeight - winnerSlot)
     local bodyLimit = math.min(screenHeight * BODY_SCREEN_FRACTION, math.max(1, availableHeight - footerHeight))
     local bodyHeight = PixelUtil.GetNearestPixelSize(math.min(offset, bodyLimit), scale)
     if bodyHeight > bodyLimit then
@@ -609,7 +663,16 @@ function Widget:RenderQuestion(view, changed)
     PixelUtil.SetHeight(self.questionContent, offset)
     PixelUtil.SetHeight(self.questionScroll, bodyHeight)
     PixelUtil.SetPoint(self.winnerText, "TOPLEFT", self.content, "TOPLEFT", 0, -bodyHeight - footerGap)
-    PixelUtil.SetSize(self.winnerText, self.content:GetWidth(), math.max(0, footerHeight - footerGap))
+    PixelUtil.SetSize(self.winnerText, self.content:GetWidth(), winnerSlot - footerGap)
+    PixelUtil.SetPoint(
+        Quiz.StreakToasts.frame,
+        "TOPLEFT",
+        self.content,
+        "TOPLEFT",
+        0,
+        -bodyHeight - winnerSlot - toastGap
+    )
+    Quiz.StreakToasts:Layout(self.content:GetWidth(), footerHeight - winnerSlot - toastGap)
     PixelUtil.SetHeight(self.content, self.questionScroll:GetHeight() + footerHeight)
     self.renderedWidth, self.renderedPrompt, self.renderedPackTitle = width, view.prompt, packTitle
     self.renderedRulesKey = view.rulesKey
@@ -730,26 +793,86 @@ function Widget:RenderWinner(view)
     self.winnerAnimation:Play()
 end
 
+function Widget:RenderStreakToasts(view, active)
+    local toasts = Quiz.StreakToasts
+    local hostName = active and view.hostName and view.hostName:lower() or nil
+    local session = active and view.session or nil
+    if self.streakHost ~= hostName or self.streakSession ~= session then
+        toasts:Clear()
+        self.streakHost, self.streakSession = hostName, session
+        self.streakResultId, self.streakSeen, self.streakResultSuppressed = nil, {}, nil
+    end
+    if self.streakPreview and not active and self.frame:IsVisible() and not self.dragging then
+        return
+    end
+    local available = active
+        and session ~= nil
+        and self.frame:IsVisible()
+        and TOAST_ACTIVE_STATES[view.state]
+        and not self.dragging
+        and not Quiz.Session.restricted
+    if not available and (toasts.active or toasts.queueCount > 0) then
+        toasts:Clear()
+    end
+    if
+        not active
+        or not view.id
+        or view.correctIndex == nil
+        or not (view.streakMilestones or view.streakReferences)
+    then
+        return
+    end
+    if self.streakResultId and view.id < self.streakResultId then
+        return
+    end
+    if self.streakResultId ~= view.id then
+        self.streakResultId, self.streakSeen, self.streakResultSuppressed = view.id, {}, nil
+    end
+    if not available or view.suppressStreakToasts then
+        self.streakResultSuppressed = true
+    end
+    if view.state ~= "results" or self.streakResultSuppressed or not view.streakMilestones then
+        return
+    end
+    local events
+    for _, event in ipairs(view.streakMilestones) do
+        local name = event.name:lower()
+        if not self.streakSeen[name] then
+            self.streakSeen[name] = true
+            events = events or {}
+            events[#events + 1] = event
+        end
+    end
+    if events then
+        toasts:Enqueue(events)
+    end
+end
+
 function Widget:Refresh()
     local view = Quiz.Session:GetView()
     local active = IsActive()
+    if active and self.streakPreview then
+        self.streakPreview = nil
+        Quiz.StreakToasts:Clear()
+    end
     if not self.frame then
         if not active then
             return
         end
         self:Create()
     end
-    local shown = active or self.editing == true
+    local shown = active or self.editing == true or self.streakPreview ~= nil
     if self.frame:IsShown() ~= shown then
         self.frame:SetShown(shown)
     end
     if not self.frame:IsShown() then
+        self:RenderStreakToasts(view, active)
         return
     end
     if not active then
         view = {
             state = "preview",
-            packTitle = L.W_PREVIEW_PACK,
+            packTitle = self.streakPreview and self.streakPreview.packTitle or L.W_PREVIEW_PACK,
             prompt = L.W_PREVIEW_QUESTION,
             choices = PREVIEW_CHOICES,
         }
@@ -770,6 +893,7 @@ function Widget:Refresh()
     self:RenderQuestion(view, questionChanged)
     self:RenderScore(view)
     self:RenderWinner(view)
+    self:RenderStreakToasts(view, active)
     local duration = view.duration or Quiz.ANSWER_SECONDS
     if self.timerDuration ~= duration then
         self.timerDuration = duration

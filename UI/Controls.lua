@@ -20,6 +20,9 @@ local TAB_TEXT_PADDING = 12
 local TAB_HIGHLIGHT_ATLAS = "housing-basic-panel-gradient-header-bg"
 local TAB_HIGHLIGHT_HEIGHT = 21
 local TAB_HIGHLIGHT_WIDTH_SCALE = 1.84
+local TEXT_SCROLL_SPEED = 30
+local TEXT_SCROLL_PAUSE = 1.5
+local TEXT_SCROLL_MIN_DURATION = 1
 local COLORS = {
     border = { 0, 0, 0, 1 },
     selected = { 1, 0.82, 0, 1 },
@@ -27,7 +30,8 @@ local COLORS = {
     muted = { 0.6, 0.6, 0.6, 1 },
 }
 
-Quiz.Controls = { pixelSkins = {}, scrolls = {}, tabs = {}, buttons = {}, edits = {}, dividers = {} }
+Quiz.Controls =
+    { pixelSkins = {}, scrolls = {}, tabs = {}, buttons = {}, edits = {}, dividers = {}, scrollingLabels = {} }
 local Controls = Quiz.Controls
 
 local function Pixels(frame, count)
@@ -56,6 +60,33 @@ end
 local function LayoutEditText(edit)
     local inset = PixelUtil.GetNearestPixelSize(INPUT_INSET, edit:GetEffectiveScale())
     edit:SetTextInsets(inset, inset, inset, inset)
+end
+
+local function LayoutScrollingLabel(frame, reset)
+    local width = frame:GetWidth()
+    local measuredWidth = frame.Text:GetUnboundedStringWidthForText(frame.Text:GetText() or "")
+    local textWidth = PixelUtil.GetNearestPixelSize(measuredWidth, frame:GetEffectiveScale())
+    if textWidth < measuredWidth then
+        textWidth = textWidth + Pixels(frame, 1)
+    end
+    local distance = width > 0 and math.max(0, textWidth - width) or 0
+    local changed = reset or frame.scrollDistance ~= distance
+    local visible = frame:IsVisible()
+    if (changed or distance == 0 or not visible) and frame.animation:IsPlaying() then
+        frame.animation:Stop()
+    end
+    frame.Text:SetSize(math.max(width, textWidth), frame:GetHeight())
+    if changed then
+        frame.scrollDistance = distance
+        local duration = math.max(TEXT_SCROLL_MIN_DURATION, distance / TEXT_SCROLL_SPEED)
+        frame.forward:SetDuration(duration)
+        frame.backward:SetDuration(duration)
+        frame.forward:SetOffset(-distance, 0)
+        frame.backward:SetOffset(distance, 0)
+    end
+    if distance > 0 and visible and not frame.animation:IsPlaying() then
+        frame.animation:Play()
+    end
 end
 
 local function Texture(parent, layer, color)
@@ -117,6 +148,46 @@ function Controls:Label(parent, text, font)
     label:SetNonSpaceWrap(true)
     label:SetText(text or "")
     return label
+end
+
+function Controls:ScrollingLabel(parent, text, font)
+    local frame = CreateFrame("Frame", nil, parent)
+    frame:SetClipsChildren(true)
+    frame:EnableMouse(false)
+    frame.Text = self:Label(frame, text, font)
+    frame.Text:SetWordWrap(false)
+    frame.Text:SetNonSpaceWrap(false)
+    frame.Text:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
+    frame.animation = frame.Text:CreateAnimationGroup()
+    frame.animation:SetLooping("REPEAT")
+    frame.forward = frame.animation:CreateAnimation("Translation")
+    frame.backward = frame.animation:CreateAnimation("Translation")
+    for order, translation in ipairs({ frame.forward, frame.backward }) do
+        translation:SetOrder(order)
+        translation:SetStartDelay(TEXT_SCROLL_PAUSE)
+        translation:SetSmoothing("IN_OUT")
+    end
+    frame:SetScript("OnSizeChanged", function(self)
+        LayoutScrollingLabel(self)
+    end)
+    frame:SetScript("OnShow", function(self)
+        LayoutScrollingLabel(self)
+    end)
+    frame:SetScript("OnHide", function(self)
+        self.animation:Stop()
+    end)
+    self.scrollingLabels[frame] = true
+    LayoutScrollingLabel(frame)
+    return frame
+end
+
+function Controls:SetScrollingText(frame, text, reset)
+    if (frame.Text:GetText() or "") == text and not reset then
+        return
+    end
+    frame.animation:Stop()
+    frame.Text:SetText(text)
+    LayoutScrollingLabel(frame, true)
 end
 
 function Controls:Panel(parent, name)
@@ -301,6 +372,9 @@ function Controls:RefreshScale()
     end
     for divider, width in pairs(self.dividers) do
         LayoutDivider(divider, width)
+    end
+    for frame in pairs(self.scrollingLabels) do
+        LayoutScrollingLabel(frame)
     end
 end
 

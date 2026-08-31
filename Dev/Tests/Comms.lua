@@ -1,5 +1,5 @@
 return function(Quiz)
-    local PREFIX = "ORBITQUIZ7"
+    local PREFIX = "ORBITQUIZ8"
     local assertions = 0
     local Comms = Quiz.Comms
     local originals = {
@@ -510,6 +510,37 @@ return function(Quiz)
         Same(#message.fields, 22, "reassembled maximum question retains every current field")
         Same(message.fields[16], largestQuestion[16], "canonical pack rules survive maximum-size transport")
         Same(message.fields[22], largestQuestion[22], "the sixth maximum-length choice survives transport")
+    end
+
+    Fresh()
+    local speakerIds, speakerNames = {}, {}
+    for index = 1, 4 do
+        speakerIds[index] = string.format("%.0f", 9007199254740986 + index)
+        speakerNames[index] = string.rep(string.char(64 + index), 114) .. "-Realm"
+    end
+    local largestNameBatch = {
+        "N",
+        string.rep("s", 64),
+        string.rep("r", 64),
+        table.concat(speakerIds, ","),
+        table.concat(speakerNames, ","),
+    }
+    for index = 1, 16 do
+        Check(
+            Comms:Send(Player(index), largestNameBatch),
+            "bounded four-name metadata fits every supported participant"
+        )
+    end
+    Same(Comms.queueCount, 64, "even maximum-length names use at most four fragments per bounded identity batch")
+    Drain()
+    Same(#failures, 0, "a complete maximum-size identity batch fits the normal transport lifetime")
+    for _, packet in ipairs(sent) do
+        Comms:Receive(PREFIX, packet.text, "WHISPER", packet.target)
+    end
+    Same(#received, 16, "maximum-size metadata survives ordinary addon fragmentation")
+    for _, message in ipairs(received) do
+        Same(message.fields[4], largestNameBatch[4], "full speaker IDs survive bounded metadata delivery")
+        Same(message.fields[5], largestNameBatch[5], "full qualified names survive bounded metadata delivery")
     end
 
     Fresh()

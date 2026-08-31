@@ -36,7 +36,8 @@ local HOST_HELP_Y = -116
 local HOST_HELP_HEIGHT = 136
 local SETTINGS_SLIDER_Y = 0
 local SETTINGS_FONT_Y = -40
-local SETTINGS_HELP_Y = -88
+local SETTINGS_VOLUME_Y = -80
+local SETTINGS_HELP_Y = -128
 local SETTINGS_HELP_HEIGHT = 114
 local PANEL_SCROLLBAR = { rightOffset = PADDING, rightOffsetPixels = -10 }
 local PANEL_STRATA = "DIALOG"
@@ -226,7 +227,7 @@ function UI:CreatePlayPage(page)
     self.gameRowPool = CreateFramePool("Frame", self.gamesContent, nil, function(_, row)
         row:Hide()
         row:ClearAllPoints()
-        row.game = nil
+        row.game, row.gameKey = nil, nil
     end)
     self.current = Label(page, L.W_NO_SESSION, 0, -270, CONTENT_WIDTH - 108, 34)
     self.leave = Button(page, L.W_LEAVE, CONTENT_WIDTH - 104, -270, 104, function()
@@ -366,6 +367,25 @@ function UI:CreateSettingsPage(page)
     end)
     self.fontPicker = self.fontRow.Control
     Place(self.fontRow, page, 0, SETTINGS_FONT_Y, CONTENT_WIDTH, self.fontRow.layoutHeight)
+    self.soundVolume = Quiz.Store:GetSoundVolume()
+    self.volumeSlider = Quiz.SettingsControls:Slider(
+        page,
+        L.W_SOUND_VOLUME,
+        CONTENT_WIDTH,
+        self.soundVolume,
+        Quiz.SOUND_VOLUME_MIN,
+        Quiz.SOUND_VOLUME_MAX,
+        Quiz.SOUND_VOLUME_STEP,
+        function(value)
+            return L.W_SOUND_VOLUME_F:format(value)
+        end,
+        function(value)
+            if value ~= self.soundVolume then
+                self:SaveSoundVolume(value)
+            end
+        end
+    )
+    Place(self.volumeSlider, page, 0, SETTINGS_VOLUME_Y, CONTENT_WIDTH, self.volumeSlider.layoutHeight)
     self.widgetSettingsHelp = Label(page, "", 0, SETTINGS_HELP_Y, CONTENT_WIDTH, SETTINGS_HELP_HEIGHT)
     Controls:SetMuted(self.widgetSettingsHelp)
 end
@@ -379,6 +399,10 @@ function UI:RefreshWidgetSettings()
     self.widgetSettings = settings
     if self.scaleSlider.Slider.Slider:GetValue() ~= settings.scale then
         self.scaleSlider:SetValue(settings.scale)
+    end
+    self.soundVolume = Quiz.Store:GetSoundVolume()
+    if self.volumeSlider.Slider.Slider:GetValue() ~= self.soundVolume then
+        self.volumeSlider:SetValue(self.soundVolume)
     end
     if fontChanged then
         self.widgetMediaRevision = Quiz.Media.revision
@@ -400,6 +424,15 @@ function UI:SaveWidgetSettings(settings)
     end
     self:RefreshWidgetSettings()
     self:Refresh()
+end
+
+function UI:SaveSoundVolume(value)
+    local ok, reason = Quiz.Store:SaveSoundVolume(value)
+    self.actionError = not ok and (L.errors[reason] or reason or L.W_ACTION_FAILED) or nil
+    if ok then
+        Quiz.StreakToasts:SetVolume(Quiz.Store:GetSoundVolume())
+    end
+    self:RefreshWidgetSettings()
 end
 
 function UI:Create()
@@ -550,8 +583,9 @@ function UI:RefreshGames(view)
     self.nextGamesRefresh = GetTime() + GAME_REFRESH_INTERVAL
     self.gamesViewKey = currentKey
     local games = self.gamePreview and self.gamePreview.games or Quiz.Discovery:GetGames()
+    local count = math.min(MAX_GAME_ROWS, #games)
     local signature = { currentKey }
-    for index = 1, math.min(MAX_GAME_ROWS, #games) do
+    for index = 1, count do
         local game = games[index]
         signature[#signature + 1] = table.concat(
             { game.hostName, game.session, game.packName, game.league, game.state, tostring(game.players) },
@@ -565,16 +599,22 @@ function UI:RefreshGames(view)
     local scrollbar = self.gamesScroll.ScrollBar
     scrollbar:BeginLayout()
     self.gamesSignature = signature
-    self.gameRowPool:ReleaseAll()
-    self.gameRows = {}
+    for index = #self.gameRows, count + 1, -1 do
+        self.gameRowPool:Release(self.gameRows[index])
+        self.gameRows[index] = nil
+    end
     self.gamesEmpty:SetShown(#games == 0)
-    for index = 1, math.min(MAX_GAME_ROWS, #games) do
-        local row, isNew = self.gameRowPool:Acquire()
+    for index = 1, count do
+        local row, isNew = self.gameRows[index]
+        if not row then
+            row, isNew = self.gameRowPool:Acquire()
+        end
         if isNew then
             row.host = Label(row, "", GAP, -GAP, CONTENT_WIDTH - GAME_JOIN_WIDTH - GAP * 3, 18, "GameFontNormal")
-            row.detail = Label(row, "", GAP, -28, CONTENT_WIDTH - GAME_JOIN_WIDTH - GAP * 3, 18)
+            row.detailViewport =
+                Place(Controls:ScrollingLabel(row, ""), row, GAP, -28, CONTENT_WIDTH - GAME_JOIN_WIDTH - GAP * 3, 18)
+            row.detail = row.detailViewport.Text
             row.host:SetWordWrap(false)
-            row.detail:SetWordWrap(false)
             Controls:SetMuted(row.detail)
             row.join = Button(row, L.W_JOIN, CONTENT_WIDTH - GAME_JOIN_WIDTH, -12, GAME_JOIN_WIDTH, function()
                 if not row.game or row.game.preview then
@@ -586,10 +626,16 @@ function UI:RefreshGames(view)
             end)
         end
         local game = games[index]
+        local gameKey = game.hostName .. ":" .. game.session
+        Controls:SetScrollingText(
+            row.detailViewport,
+            L.W_GAME_DETAIL_F:format(game.packName, game.players),
+            row.gameKey ~= gameKey
+        )
+        row.gameKey = gameKey
         row.game = game
         Place(row, self.gamesContent, 0, -(index - 1) * ROW_HEIGHT, CONTENT_WIDTH, ROW_HEIGHT)
         row.host:SetText(game.hostName)
-        row.detail:SetText(L.W_GAME_DETAIL_F:format(game.packName, game.players))
         local joined = Quiz.Session.client ~= nil
             and view.state ~= "disconnected"
             and (view.hostName or ""):lower() == game.hostName:lower()
@@ -599,7 +645,7 @@ function UI:RefreshGames(view)
         row:Show()
         self.gameRows[index] = row
     end
-    PixelUtil.SetHeight(self.gamesContent, GamesHeight(self.gamesScroll, math.min(MAX_GAME_ROWS, #games)))
+    PixelUtil.SetHeight(self.gamesContent, GamesHeight(self.gamesScroll, count))
     scrollbar:EndLayout()
 end
 

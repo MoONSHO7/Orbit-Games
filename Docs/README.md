@@ -10,7 +10,7 @@ Keep user-facing instructions separate from module maintenance contracts.
 
 ## Implementation
 
-[QUICKSTART.md](QUICKSTART.md) covers hosting, joining, appearance, saved progress and verification. [PACKS.md](PACKS.md) gives complete files for an independently distributed addon, its required Orbit-Quiz dependency, the public schema, rule identities and validation errors.
+[QUICKSTART.md](QUICKSTART.md) covers hosting, joining, appearance/sound preferences, saved progress and verification. [PACKS.md](PACKS.md) gives complete files for an independently distributed addon, its required Orbit-Quiz dependency, the public schema, rule identities and validation errors.
 
 ## Gotchas
 

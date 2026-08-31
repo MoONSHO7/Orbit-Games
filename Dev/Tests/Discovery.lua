@@ -1,6 +1,6 @@
 return function(Quiz)
     local Discovery = Quiz.Discovery
-    local PREFIX = "ORBITQUIZDISC7"
+    local PREFIX = "ORBITQUIZDISC8"
     local LOBBY = "OrbitQuizLobby"
     local originals = {
         main = Quiz.Main,
@@ -176,7 +176,7 @@ return function(Quiz)
     end
     local function Advert(session, pack, league, state, players)
         return table.concat(
-            { "7", "A", session or "101.1", pack or "First pack", league or "League", state or "open", players or "1" },
+            { "8", "A", session or "101.1", pack or "First pack", league or "League", state or "open", players or "1" },
             "|"
         )
     end
@@ -220,7 +220,7 @@ return function(Quiz)
     Same(#joins, 1, "automatic lobby join needs no typing")
     Same(#sent, 0, "joining waits for native membership before lookup")
     Tick(103)
-    Same(sent[1].text, "7|Q", "a lookup follows automatic join")
+    Same(sent[1].text, "8|Q", "a lookup follows automatic join")
     Same(sent[1].channel, "CHANNEL", "solo discovery uses hidden lobby traffic")
     Same(#Discovery:GetGames(), 0, "sending a lookup does not fabricate hosts")
 
@@ -309,9 +309,9 @@ return function(Quiz)
     Check(Receive(Advert("101.2")), "a new session replaces the same host's old row")
     Same(#Discovery:GetGames(), 1, "one native host has only one browser row")
     Same(Receive(Advert()), false, "late old-session advertisements cannot undo replacement")
-    Check(Receive("7|X|101.1"), "stale withdrawal is harmless")
+    Check(Receive("8|X|101.1"), "stale withdrawal is harmless")
     Same(Discovery:GetGames()[1].session, "101.2", "stale withdrawal does not close the replacement")
-    Check(Receive("7|X|101.2"), "matching stop withdraws a game")
+    Check(Receive("8|X|101.2"), "matching stop withdraws a game")
     Same(#Discovery:GetGames(), 0, "stopped game disappears immediately")
     Same(Receive(Advert("101.2")), false, "queued advertisements cannot resurrect a withdrawn session")
 
@@ -323,25 +323,26 @@ return function(Quiz)
         "4|A|101.1|Pack|League|open|1",
         "5|A|101.1|Pack|League|open|1",
         "6|A|101.1|Pack|League|open|1",
-        "7|A|101.1|Pack|League|open|0",
-        "7|A|101.1|Pack|League|open|18",
-        "7|A|101.1|Pack|League|open|nan",
-        "7|A|101.1|Pack|League|open|1.5",
-        "7|A|101.1|Pack|League|finished|1",
-        "7|A|101.1|Pack|League|open|1|extra",
-        "7|A||Pack|League|open|1",
-        "7|A|101.1||League|open|1",
-        "7|A|101.1|Pack||open|1",
-        "7|A|101.1|{rt1}|League|open|1",
-        "7|A|101.1|Pack\nInjected|League|open|1",
-        "7|A|101.1|Pack\000Injected|League|open|1",
-        "7|A|101.1|Pack\127Injected|League|open|1",
+        "7|A|101.1|Pack|League|open|1",
+        "8|A|101.1|Pack|League|open|0",
+        "8|A|101.1|Pack|League|open|18",
+        "8|A|101.1|Pack|League|open|nan",
+        "8|A|101.1|Pack|League|open|1.5",
+        "8|A|101.1|Pack|League|finished|1",
+        "8|A|101.1|Pack|League|open|1|extra",
+        "8|A||Pack|League|open|1",
+        "8|A|101.1||League|open|1",
+        "8|A|101.1|Pack||open|1",
+        "8|A|101.1|{rt1}|League|open|1",
+        "8|A|101.1|Pack\nInjected|League|open|1",
+        "8|A|101.1|Pack\000Injected|League|open|1",
+        "8|A|101.1|Pack\127Injected|League|open|1",
         Advert(string.rep("a", 65)),
         Advert(nil, string.rep("p", 65)),
         Advert(nil, nil, string.rep("l", 49)),
         string.rep("a", 256),
-        "7|J|Alice",
-        "7|Q|spoofed-target",
+        "8|J|Alice",
+        "8|Q|spoofed-target",
         "return loadstring('bad')()",
     }) do
         Same(Receive(packet), false, "malformed and unrelated wire messages reject")
@@ -455,18 +456,18 @@ return function(Quiz)
 
     Fresh()
     Host()
-    Check(Receive("7|Q", "Alice-TestRealm", "WHISPER"), "explicit native probe is handled")
+    Check(Receive("8|Q", "Alice-TestRealm", "WHISPER"), "explicit native probe is handled")
     Same(Discovery.queueCount, 1, "one private reply is scheduled")
     for _ = 1, 20 do
-        Check(Receive("7|Q", "Alice-TestRealm", "WHISPER"), "repeated query is handled")
+        Check(Receive("8|Q", "Alice-TestRealm", "WHISPER"), "repeated query is handled")
     end
     Same(Discovery.queueCount, 1, "repeated query is coalesced")
     Tick(100)
     Same(sent[1].target, "Alice-TestRealm", "host reply goes to the actual native query sender")
-    Check(sent[1].text:match("^7|A|100.1|"), "host reply advertises only the current game")
+    Check(sent[1].text:match("^8|A|100.1|"), "host reply advertises only the current game")
     Same(Quiz.Session.client, nil, "host-side discovery also cannot join anything")
     Fresh()
-    Same(Receive("7|Q", "Alice-TestRealm", "WHISPER"), true, "idle client quietly handles a query")
+    Same(Receive("8|Q", "Alice-TestRealm", "WHISPER"), true, "idle client quietly handles a query")
     Same(Discovery.queueCount, 0, "idle clients do not answer discovery requests")
 
     Fresh()
@@ -489,7 +490,7 @@ return function(Quiz)
     Fresh()
     Host()
     for index = 1, 100 do
-        Check(Receive("7|Q", Player(index), "WHISPER"), "native lookup flood remains harmless")
+        Check(Receive("8|Q", Player(index), "WHISPER"), "native lookup flood remains harmless")
     end
     Same(Discovery.responderCount, 32, "reply bookkeeping is bounded")
     Same(Discovery.queueCount, 32, "reply queue cannot exceed its cap")
@@ -562,19 +563,19 @@ return function(Quiz)
     Tick(100)
     Discovery:StopHost()
     for _, entry in pairs(Discovery.queue) do
-        Check(not entry.message:match("^7|A|"), "withdrawal removes unsent advertisements")
+        Check(not entry.message:match("^8|A|"), "withdrawal removes unsent advertisements")
     end
     Tick(101)
-    Check(sent[#sent].text:match("^7|X|100.1$"), "stop publishes a bounded withdrawal")
+    Check(sent[#sent].text:match("^8|X|100.1$"), "stop publishes a bounded withdrawal")
     Flush(5)
     for index = 2, #sent do
-        Check(not sent[index].text:match("^7|A|100.1|"), "same stopped session is never readvertised")
+        Check(not sent[index].text:match("^8|A|100.1|"), "same stopped session is never readvertised")
     end
     Host("100.2")
     Flush(6)
     local foundReplacement = false
     for _, packet in ipairs(sent) do
-        foundReplacement = foundReplacement or packet.text:match("^7|A|100.2|") ~= nil
+        foundReplacement = foundReplacement or packet.text:match("^8|A|100.2|") ~= nil
     end
     Check(foundReplacement, "a new hosted session can advertise after stopping another")
 

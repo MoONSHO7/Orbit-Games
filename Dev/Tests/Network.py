@@ -6,8 +6,8 @@ from lupa.lua51 import lua_type
 
 from run import runtime
 
-QUIZ_PREFIX = "ORBITQUIZ7"
-DISCOVERY_PREFIX = "ORBITQUIZDISC7"
+QUIZ_PREFIX = "ORBITQUIZ8"
+DISCOVERY_PREFIX = "ORBITQUIZDISC8"
 LOBBY_NAME = "OrbitQuizLobby"
 REVEAL_SECONDS = 3
 BOUNDARY_EPSILON = 0.001
@@ -138,7 +138,7 @@ class World:
                         fields = decode_fields(fragment)
                 elif prefix == DISCOVERY_PREFIX:
                     version, code, *_ = wire.decode("utf-8").split("|")
-                    assert version == "7", "discovery advertises the personal-pack scoring protocol version"
+                    assert version == "8", "discovery advertises the streak-toast protocol version"
                     message_id, part, total = str(source.cursor).encode("ascii"), b"1", b"1"
                     fields = wire.decode("utf-8").split("|")
                 else:
@@ -957,7 +957,7 @@ def run_suite():
     host, player = world.nodes
     host.test.lobbyJoined, player.test.lobbyJoined = True, True
     host.test.lobbyId, player.test.lobbyId = 17, 29
-    advertisement = f"7|A|123.456|{player.name}|Native identity|open|1".encode("utf-8").hex()
+    advertisement = f"8|A|123.456|{player.name}|Native identity|open|1".encode("utf-8").hex()
     player.receive(DISCOVERY_PREFIX, advertisement, "CHANNEL", host.name, None, host.test.lobbyId, LOBBY_NAME)
     equal(len(player.games()), 0, "sender's channel number cannot substitute for recipient-local channel identity")
     player.receive(DISCOVERY_PREFIX, advertisement, "CHANNEL", host.name, None, player.test.lobbyId, "Trade")
@@ -1245,7 +1245,7 @@ def run_suite():
     player_results = captured_results(world.packets, host, player)
     check(player_results, "winner fixture captured a complete encoded result")
     result_fields, _ = player_results[-1]
-    equal(len(result_fields), 22, "current results append canonical rules and explicit streak accounting")
+    equal(len(result_fields), 23, "current results append canonical rules and compact group streak accounting")
     equal(result_fields[17], host.name, "the winner name is carried only in the result metadata")
     equal(float(result_fields[18]), host_elapsed, "wire winner time preserves the authoritative double")
     popup_plays = player.quiz.Widget.winnerAnimation.playCalls
@@ -1795,6 +1795,141 @@ def run_suite():
     for node in world.nodes:
         equal(len(node.test.errors), 0, "full capacity has no Lua errors")
         equal(len(node.test.sent), 0, "full capacity stays invisible to public chat")
+
+    world = World("Streakhost", "Streakplayer", "Streakfriend")
+    host, player, friend = world.nodes
+    rules_id = "wire-streak-toasts"
+    register_rule_pack(host, rules_id, dict(shuffleQuestions=False, shuffleChoices=False), count=1)
+    setup = host.call("Store", "GetSettings")
+    setup.packId = rules_id
+    ok(host.call("Main", "Start", setup), "group milestone fixture starts without a scoring bonus rule")
+    ok(player.call("Session", "JoinHost", host.name), "first group milestone participant joins")
+    missing_name_packets = []
+
+    def drop_friend_name(packet):
+        if (packet["source"] is host and packet["target"] == player.name and packet["code"] == "N"
+                and packet["fields"] and friend.name in packet["fields"][4].split(",")):
+            missing_name_packets.append(packet)
+            return True
+        return False
+
+    world.drop = drop_friend_name
+    world.until(lambda: player.view().state == "open" and player.quiz.Session.client.streakSpeakers is not None
+                and player.quiz.Session.client.streakSpeakers.count == 2)
+    ok(friend.call("Session", "JoinHost", host.name), "another group milestone participant joins after known identities prewarm")
+    previous_round = None
+    for expected_streak in range(1, 6):
+        world.until(lambda: all(node.view().state == "open" and node.view().id != previous_round for node in world.nodes),
+                    seconds=30)
+        round_ = host.quiz.Main.game.round
+        if expected_streak == 5:
+            old_request = player.quiz.Session.client.request
+            player.test.restricted = True
+            world.advance(0.4)
+            player.test.restricted = False
+            player.event("ADDON_RESTRICTION_STATE_CHANGED", 5, 0)
+            world.until(lambda: player.view().state == "open" and player.view().id == round_.id
+                        and player.quiz.Session.client.request != old_request)
+            check(not player.view().suppressStreakToasts, "an unscored mid-question reconnect does not suppress a future milestone")
+        for node in world.nodes:
+            equal(node.view().streakMilestones, None, "open selections never expose a provisional milestone batch")
+            ok(node.call("Session", "SubmitAnswer", 2), "all three players answer the streak round correctly")
+        world.until(lambda: all(not node.view().pending for node in (player, friend)))
+        world.until(lambda: all(node.view().correctIndex is not None for node in world.nodes), seconds=20)
+        for node in world.nodes:
+            equal(node.view().streak, expected_streak, "the host's final correct streak reaches every participant")
+            equal(node.view().streakBonus, 0, "toast milestones do not enable the pack's disabled scoring bonus")
+        if expected_streak < 5:
+            for node in world.nodes:
+                equal(len(node.view().streakMilestones), 0, "correct streaks below five produce no group toast events")
+        previous_round = round_.id
+    check(missing_name_packets, "the simulation genuinely lost repeated name dictionary messages")
+    equal(len(host.view().streakMilestones), 3, "the host commits all three fifth-correct milestones")
+    equal(len(friend.view().streakMilestones), 3, "a complete dictionary resolves the full authoritative batch")
+    equal({event.name: event.streak for event in player.view().streakMilestones.values()},
+          {host.name: 5, player.name: 5}, "a dropped unrelated name never suppresses known player milestones")
+    equal(player.personal(rules_id).answers, 5, "a missing presentation dictionary never blocks score persistence")
+    check(not player.view().suppressStreakToasts, "successful open-round reconnect still celebrates its first real fifth result")
+    world.drop = lambda packet: False
+    world.until(lambda: len(player.view().streakMilestones) == 3, seconds=2.5)
+    equal({event.name: event.streak for event in player.view().streakMilestones.values()},
+          {host.name: 5, player.name: 5, friend.name: 5}, "a recovered map adds only the missing current-result identity")
+    results = captured_results(world.packets, host, player)
+    fifth_fields = next(fields for fields, _ in reversed(results) if int(fields[2]) == previous_round)
+    equal(len(fifth_fields), 23, "group milestones use one additional compact result field")
+    check(all(name not in fifth_fields[22] for name in (host.name, player.name, friend.name)),
+          "streak results reference prefetched names instead of retransmitting the group roster")
+    check(len(fifth_fields[22]) < 32, "three normal streak identities use only a few result bytes")
+    score_before = player.personal(rules_id).score
+    ok(host.call("Comms", "Send", player.name, host.lua.table_from(fifth_fields)), "same milestone receipt retransmits")
+    world.advance(0.3)
+    equal(player.personal(rules_id).answers, 5, "same round milestone retransmission cannot award twice")
+    equal(player.personal(rules_id).score, score_before, "same milestone metadata cannot adjust a recorded score")
+    world.until(lambda: all(node.view().state == "open" and node.view().id != previous_round for node in world.nodes), seconds=20)
+    ok(host.call("Comms", "Send", player.name, host.lua.table_from(fifth_fields)), "older milestone is replayed after new question")
+    for packet in missing_name_packets[-1:]:
+        world.deliver(packet)
+    world.advance(0.3)
+    equal(player.view().streakMilestones, None, "old results and name packets never attach milestones to a newer question")
+    ok(host.call("Session", "SubmitAnswer", 2), "host continues its correct streak")
+    ok(player.call("Session", "SubmitAnswer", 1), "participant intentionally breaks the streak")
+    world.until(lambda: all(node.view().correctIndex is not None for node in world.nodes), seconds=20)
+    for node in world.nodes:
+        equal({event.name: event.streak for event in node.view().streakMilestones.values()}, {host.name: 6},
+              "wrong and unanswered players reset while the correct host alone earns the next tier")
+    host.call("Main", "Stop")
+    world.until(lambda: all(node.view().state == "stopped" for node in (player, friend)))
+    for node in world.nodes:
+        equal(len(node.test.errors), 0, "streak identity loss/reconnect/replay handling has no Lua errors")
+
+    world = World("Toastleader", *["Member" + chr(65 + index) for index in range(16)])
+    host = world.nodes[0]
+    peers = world.nodes[1:]
+    host.lua.execute("""
+        local choices = {}
+        for index=1,6 do choices[index]=string.rep('x',99)..index end
+        assert(OrbitQuiz:RegisterQuestionPack({id='toast-capacity', title=string.rep('t',64),
+            rules={shuffleQuestions=false,shuffleChoices=false}, questions={
+                {id='full',prompt=string.rep('q',160),choices=choices,correctIndex=6,
+                difficulty='very_hard',era=string.rep('e',64)}
+            }}))
+    """)
+    setup = host.call("Store", "GetSettings")
+    setup.packId = "toast-capacity"
+    ok(host.call("Main", "Start", setup), "six-choice sixteen-peer milestone stress game starts")
+    for node in peers:
+        ok(node.call("Session", "JoinHost", host.name), "milestone stress participant joins")
+    initial_id = host.quiz.Main.game.round.id
+    world.until(lambda: host.quiz.Main.game.round.id != initial_id and host.quiz.Main.game.state == "open", seconds=50)
+    previous_round = initial_id
+    for expected_streak in range(1, 6):
+        world.until(lambda: all(node.view().state == "open" and node.view().id != previous_round for node in world.nodes),
+                    seconds=45)
+        round_ = host.quiz.Main.game.round
+        check(all(peer.readyId == round_.id for peer in host.quiz.Session.peers.values()),
+              "background name prefetch cannot consume the twenty-second full-capacity readiness window")
+        for node in world.nodes:
+            ok(node.call("Session", "SubmitAnswer", 6), "all seventeen players answer the capacity round")
+        world.until(lambda: all(node.view().confirmedSelected == 6 and not node.view().pending for node in peers), seconds=8)
+        world.until(lambda: all(node.view().correctIndex is not None and node.view().id == round_.id for node in peers),
+                    seconds=20)
+        check(host.quiz.Comms.queueCount < 128, "milestone metadata cannot flood the bounded gameplay transport")
+        previous_round = round_.id
+    for node in world.nodes:
+        milestones = host.quiz.Main.game.lastResult.streakMilestones if node is host else node.view().streakMilestones
+        equal(len(milestones), 17, "a normal full-capacity fifth streak resolves every player")
+        equal({event.name: event.streak for event in milestones.values()},
+              {member.name: 5 for member in world.nodes}, "every participant receives the same seventeen-player milestone batch")
+    final_receipt = next(fields for fields, _ in reversed(captured_results(world.packets, host, peers[-1]))
+                         if int(fields[2]) == previous_round)
+    check(len(final_receipt[22]) < 100, "all seventeen normal milestones fit in under one hundred result bytes")
+    world.until(lambda: host.quiz.Main.game.round.id != previous_round and host.quiz.Main.game.state == "open", seconds=30)
+    check(all(peer.readyId == host.quiz.Main.game.round.id for peer in host.quiz.Session.peers.values()),
+          "the question after a seventeen-toast result still waits for all peers without readiness expiry")
+    host.call("Main", "Stop")
+    world.until(lambda: all(node.view().state == "stopped" for node in peers), seconds=8)
+    for node in world.nodes:
+        equal(len(node.test.errors), 0, "full-capacity streak transport has no Lua errors")
 
     return assertions
 

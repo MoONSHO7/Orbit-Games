@@ -209,6 +209,7 @@ return function(Quiz)
             view.rulesKey,
             tostring(streak),
             string.format("%.1f", Quiz.Scoring.StreakBonus(view.rules, streak)),
+            "",
         }
     end
     local function Display(display)

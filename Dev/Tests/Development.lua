@@ -5,7 +5,7 @@ local LIVE_HOST = "Actualhost-TestRealm"
 local LIVE_SESSION = "actual-session.1"
 local LIVE_QUESTION = "The real question must remain active."
 local LEAGUE = "Preview regression"
-local PREFIX = "ORBITQUIZDISC7"
+local PREFIX = "ORBITQUIZDISC8"
 local EPSILON = 0.000001
 local SCROLL_HOSTS = { "Zscrollone", "Zscrolltwo", "Zscrollthree", "Zscrollfour", "Zscrollfive" }
 
@@ -69,7 +69,7 @@ return function(Quiz, development)
         Check(
             Discovery:Receive(
                 PREFIX,
-                "7|A|" .. (session or LIVE_SESSION) .. "|Real question pack|" .. LEAGUE .. "|open|3",
+                "8|A|" .. (session or LIVE_SESSION) .. "|Real question pack|" .. LEAGUE .. "|open|3",
                 "GUILD",
                 hostName or LIVE_HOST,
                 "",

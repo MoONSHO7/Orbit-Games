@@ -53,6 +53,11 @@ local function IsInteger(value, minimum, maximum)
     return IsFinite(value) and value % 1 == 0 and value >= minimum and value <= maximum
 end
 
+local function IsSoundVolume(value)
+    return IsInteger(value, Quiz.SOUND_VOLUME_MIN, Quiz.SOUND_VOLUME_MAX)
+        and (value - Quiz.SOUND_VOLUME_MIN) % Quiz.SOUND_VOLUME_STEP == 0
+end
+
 local function IsScore(value, signed)
     if not IsFinite(value) or value < (signed and -MAX_SCORE or 0) or value > MAX_SCORE then
         return false
@@ -378,6 +383,7 @@ local function MigrateLegacyScoring(saved)
         leagues = {},
         widgetPosition = saved.widgetPosition,
         widgetSettings = saved.widgetSettings,
+        soundVolume = saved.soundVolume,
         personalScores = saved.personalScores,
     }
 end
@@ -428,6 +434,10 @@ function Store:Initialize(saved)
     if not widgetSettings then
         return nil, widgetSettingsError
     end
+    local soundVolume = saved.soundVolume == nil and Quiz.SOUND_VOLUME_DEFAULT or saved.soundVolume
+    if not IsSoundVolume(soundVolume) then
+        return nil, "invalid_sound_volume"
+    end
     local personalScores, personalError = Quiz.PersonalScores:CopySaved(saved.personalScores)
     if not personalScores then
         return nil, personalError
@@ -440,6 +450,7 @@ function Store:Initialize(saved)
         legacyLeagues = legacyLeagues,
         widgetPosition = widgetPosition,
         widgetSettings = widgetSettings,
+        soundVolume = soundVolume,
         personalScores = personalScores,
     }
     self.db = db
@@ -470,6 +481,18 @@ function Store:SaveWidgetSettings(settings)
         return false, reason
     end
     self.db.widgetSettings = copy
+    return true
+end
+
+function Store:GetSoundVolume()
+    return self.db.soundVolume
+end
+
+function Store:SaveSoundVolume(volume)
+    if not IsSoundVolume(volume) then
+        return false, "invalid_sound_volume"
+    end
+    self.db.soundVolume = volume
     return true
 end
 

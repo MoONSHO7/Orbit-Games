@@ -1,5 +1,5 @@
 local PACK_ID = "interface-fixture"
-local PREFIX = "ORBITQUIZDISC7"
+local PREFIX = "ORBITQUIZDISC8"
 local FIRST_HOST = "Alpha-TestRealm"
 local SECOND_HOST = "Beta-TestRealm"
 local EPSILON = 0.000001
@@ -163,6 +163,8 @@ return function(Quiz)
             [Widget.packText] = true,
             [Widget.winnerText] = true,
             [Widget.fontProbe] = true,
+            [Quiz.StreakToasts.nameText] = true,
+            [Quiz.StreakToasts.captionText] = true,
         }
         for _, choice in ipairs(Widget.choices) do
             allowed[choice.Text] = true
@@ -181,7 +183,7 @@ return function(Quiz)
                 end
             end
         end
-        Same(count, 11, "HUD owns ten rendered text roles and one hidden font-asset probe")
+        Same(count, 13, "HUD owns ten quiz labels, two toast labels and one hidden font-asset probe")
         Same(Widget.fontProbe:IsShown(), false, "native font validation probe never appears in the HUD")
         Same(Widget.scoreText.kind, "FontString", "personal score uses only a text region")
         Same(Widget.scoreText:GetParent(), Widget.content, "floating score is outside the clipped question body")
@@ -404,7 +406,7 @@ return function(Quiz)
         Check(
             Quiz.Discovery:Receive(
                 PREFIX,
-                "7|A|" .. session .. "|Test pack|Default|open|" .. players,
+                "8|A|" .. session .. "|Test pack|Default|open|" .. players,
                 "GUILD",
                 name,
                 "",
@@ -1093,6 +1095,7 @@ return function(Quiz)
             defaultRulesKey,
             "1",
             "0.0",
+            "",
         })
         Widget:Refresh()
         Same(Widget.choices[count].tone, "correct", "fifth and sixth correct answers reveal after results")

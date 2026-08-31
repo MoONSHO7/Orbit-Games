@@ -1,6 +1,6 @@
 local _, Quiz = ...
-local PREFIX = "ORBITQUIZDISC7"
-local WIRE_VERSION = "7"
+local PREFIX = "ORBITQUIZDISC8"
+local WIRE_VERSION = "8"
 local LOBBY_NAME = "OrbitQuizLobby"
 local MAX_PACKET_BYTES = 255
 local MAX_SESSION_BYTES = 64

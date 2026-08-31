@@ -1,5 +1,5 @@
 local _, Quiz = ...
-local PREFIX = "ORBITQUIZ7"
+local PREFIX = "ORBITQUIZ8"
 local VERSION = "1"
 local MAX_FIELDS = 32
 local MAX_MESSAGE_BYTES = 4096

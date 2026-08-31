@@ -36,13 +36,28 @@ The widget shows the pack name in small grey text above the question, then a two
 
 After expiry the confirmed correct answer turns green, a wrong selection turns red, and other choices dim. Your score change briefly floats up and fades at the question's top-right: green for a gain, red for a loss, such as `+2.0` or `-0.7`. Skipping shows no personal score animation. In a round with another connected, ready player, a small popup below the answers names the fastest **correct** player and their host-recorded time. It uses the final accepted selection, not an earlier guess. Solo rounds and rounds with no correct answers show no winner. The next question clears the result; there are no permanent scores, progress counters, numeric timers, explanations or help labels on the HUD.
 
+A temporary streak toast appears beneath that popup for anyone in the game who reaches five or more consecutive correct answers. It shows their name with just **X in a row** directly underneath and a compact animated flare. At **10 or more**, the streak caption grows and shrinks back as the shine crosses the graphic. Sound-tier names are not displayed; the matching bundled voices are:
+
+| Correct in a row | Announcement |
+| ---: | --- |
+| 5 | Dominating — `dominating.mp3` |
+| 6 | Ownage — `ownage.mp3` |
+| 7 | Rampage — `rampage.mp3` |
+| 8 | Wicked Sick — `wicked-sick.mp3` |
+| 9 | Holy Shit — `holyshit.mp3` |
+| 10 and every correct answer afterward | Godlike — `godlike.mp3` |
+
+Only host-confirmed results trigger toasts, including for other players when you answer incorrectly or skip. They work even when a pack awards no streak points. The transparent burst shines and fades over 3.2 seconds, with no black panel behind it. Playback finishes naturally before the next queued toast starts, even if the audio outlasts the animation. Simultaneous achievers queue without overlapping voices, and queued updates for the same player coalesce to their newest streak. Sounds respect the game's Sound Effects (SFX) setting. Muted or unavailable audio does not prevent the visual toast.
+
+The queue can continue into the next question without moving the answers. Pausing, communication restrictions, leaving, switching hosts, ending a game, hiding, dragging or changing widget appearance clears it without replay. This includes automatic finite-game completion: it does not extend the authored result break to finish announcements. Reconnecting to already received results never replays them.
+
 All HUD text uses an opaque black shadow at **x = -2, y = -2 physical pixels** (down-left), refreshed when UI scale, resolution or font changes. Question, answer and smaller label sizes scale together with the widget. Private font objects leave Blizzard's and other addons' fonts untouched.
 
 Gold is a local selection indicator, not an acknowledgement from the host: a late or failed change can leave the previously accepted choice as your scored answer. Results reconcile it to the actual scored choice. Errors and connection notices are available in `/oq`, not appended to the question widget.
 
 You can belong to only one game. Joining another host automatically leaves the old game; if you are hosting, it stops your hosted game first. Use **Leave game** under Games (or `/oq leave`) to leave. A missed departure message can leave a stale slot on the old host for up to 35 seconds, but cannot return you to that game.
 
-Sessions support one host and up to 16 remote widget players. Install this build on each client: protocol 7 intentionally isolates earlier builds that cannot interpret pack rules and streak receipts. Only the host needs extra packs; validated rules travel with the questions and results. Discovery uses a silently joined `OrbitQuizLobby` custom channel plus available guild/group routes. This lobby is not attached to a visible chat tab. Questions and answers use native addon whispers, not visible whispers or chat lines.
+Sessions support one host and up to 16 remote widget players. Install this build on each client: protocol 8 intentionally isolates earlier builds that cannot interpret group streak announcements. Only the host needs extra packs; validated rules travel with the questions and results. Discovery uses a silently joined `OrbitQuizLobby` custom channel plus available guild/group routes. This lobby is not attached to a visible chat tab. Questions and answers use native addon whispers, not visible whispers or chat lines.
 
 Realm/channel restrictions still apply: a guild/group listing does not guarantee that addon whispers can reach a cross-realm host. There is no Battle.net relay. If joining times out, check matching addon versions, connectivity, and whether the session is full. `/oq join Name-Realm` remains a diagnostic fallback, not the normal player workflow.
 
@@ -52,15 +67,17 @@ The `/oq` window reproduces Orbit's Edit Mode settings dialog styling, including
 
 While `/oq` is open, a purple edit outline appears around the Q/A widget. Drag it to position it, then close the panel to lock it. The HUD stays visible throughout an active session and has no Close or Escape action of its own.
 
-The bare widget follows Orbit's Error Messages positioning: horizontal screen thirds align the pack name and question; the upper/lower half determines which way content grows. Answers stay left-aligned in one column. Long content scrolls within a bounded area, with space reserved beside the prompt for the pack's possible score values and below the answers for the winner. Neither animation moves the question or answer rows. Position is saved separately from host setup and reflows when display size or UI scale changes; the timer stays exactly two physical pixels thick.
+The bare widget follows Orbit's Error Messages positioning: horizontal screen thirds align the pack name and question; the upper/lower half determines which way content grows. Answers stay left-aligned in one column. Long content scrolls within a bounded area, with space reserved beside the prompt for the pack's possible score values and below the answers for the winner and streak toast. These animations never move the question or answer rows. Position is saved separately from host setup and reflows when display size or UI scale changes; the timer stays exactly two physical pixels thick.
 
 With no active game, `/oq` shows a positioning preview; closing the panel hides only that preview.
 
-## Q/A appearance
+## Q/A appearance and sound
 
 Open `/oq` → **Settings**. **Scale** adjusts the widget from **50% to 200% in 5% steps**, with a gold percentage beside the inline slider. **Font** opens a searchable SharedMedia list with font previews; **Default (Blizzard)** restores the native font. The controls match Orbit's dialog styling but need no Orbit installation. SharedMedia support is bundled, and additional fonts appear when installed addons register them.
 
-Changes apply immediately to all HUD text, including the pack label, answers and round feedback, and save automatically between sessions. They do not change the setup window, host settings, current answer or question deadline. The timer and text-shadow offsets stay two physical pixels at every Q/A scale; the answer's pressed offset stays one physical pixel.
+Appearance changes apply immediately to all HUD text, including the pack label, answers, round feedback and streak toast, and save automatically between sessions. They do not change the setup window, host settings, current answer or question deadline. The timer and text-shadow offsets stay two physical pixels at every Q/A scale; the answer's pressed offset stays one physical pixel.
+
+**Volume** adjusts streak sounds from **0% to 100% in 10% steps**; **0% disables them**, while visual announcements continue. The default 100% preserves the original clips. This is relative to the game's Sound Effects level and never changes other game/addon sound settings or Blizzard's normal UI clicks. Nonzero changes take effect on the next clip so the current voice can finish; muting stops it immediately. Neither resets the toast nor replays it when unmuted. Volume saves independently of Scale, Font and quiz setup.
 
 These preferences are local to your installation, not sent to other players. If a saved font's provider is missing, the picker marks it unavailable and uses the Blizzard font without forgetting your choice. It switches back when that provider registers the font again; installing new font files may require restarting WoW.
 
@@ -104,7 +121,7 @@ An unfinished question never scores after a manual pause, stop, host logout, or 
 
 When the host's addon communication is restricted or its chat server disconnects, the quiz automatically pauses and voids the unfinished question. Once available again it resumes with a fresh question, or ends if a finite quiz has no questions left. A manually paused quiz stays paused. If a finite quiz already completed its final answer, recovery retries that result and gives it a fresh reveal interval before ending. A restricted participant disables input, then re-registers and waits for current host state. Older answers and acknowledgements cannot overwrite the recovered selection; a missing locked-answer confirmation is retried without changing the accepted answer's time.
 
-## Development-only game-list preview
+## Development-only previews
 
 In a source/development checkout, `/oqdev games` opens **Games** with 32 dummy hosts using the real rows and scrollbar. `/oqdev` is a shortcut. The sample data includes short and long names, multilingual text, varied pack titles, and player counts from 1 to 17. The header and footer clearly mark the preview; all dummy **Join** buttons are disabled.
 
@@ -112,7 +129,17 @@ Use `/oqdev off` to restore real discovered games. Preview mode is not saved and
 
 Check long-name truncation, scrolling to the final row, switching tabs, reopening the panel, and changing UI scale. Clear the preview and confirm the real list and its Join buttons return. This tests the existing Orbit-style chrome without introducing another frame design.
 
-The development module and command are excluded by the TOC/package metadata when building a release with the WoW packager. Manually copied source trees still contain the opt-in command.
+To test the streak display and sounds without playing a quiz, leave/stop any current game, `/reload`, then run:
+
+```text
+/oqdev toasts
+```
+
+This shows the real Q/A widget with a **Streak preview · DEV** label and seven sample players reaching five through eleven correct in a row. It previews all six clips in sequence at your saved Volume, including Godlike at both ten and eleven, over about 22 seconds; it waits longer if a sound is still playing, and 0% keeps it silent. The widget uses your saved position, Scale, Font and shadows; its answers are not interactive. The command neither opens setup nor adds discovery/network traffic, and it cannot change scores or start/join a game. It refuses to interrupt active, paused or joining sessions.
+
+The preview hides when finished, or returns to the normal positioning preview if `/oq` is already open. Run the command again to restart, or use `/oqdev off` to stop immediately. Closing an open `/oq` window, hiding/dragging/reflowing the HUD, or starting/joining a real game cancels it. Adjust appearance or position under `/oq`, then rerun the preview. Check Quiz's Volume and the game's Sound Effects (SFX) setting if visuals appear without audio.
+
+This is a local presentation check, not a multiplayer or scoring test; use the two-client checks below for those. The development module and commands are excluded by the TOC/package metadata when building a release with the WoW packager. Manually copied source trees contain these opt-in commands.
 
 ## Troubleshooting and two-client verification
 
@@ -124,8 +151,10 @@ Offline checks and the following checklist are not a claim of live-client verifi
 - Press, release, repeat and change answers with `/oq` open and closed. Only the pressed label nudges one pixel and dims; releasing, moving away, starting a drag or reaching the deadline restores it. Hit areas and all other text stay still, with no scrollbar flash or premature result animation. Scroll a long question just before it ends; the next question must start at the top without inheriting wheel motion. Check the (-2, -2) black shadows over bright scenery, including the leftmost and last answer glyphs.
 - With Orbit disabled, inspect `/oq`: NineSlice border, centered title, native close button, four gold tabs, raised divider, native pack/score dropdowns, Orbit-style Settings controls, styled inputs, and pressed/disabled buttons. Open pack, score and font lists, scroll, select an entry, and check that hiding the panel closes its popup. There must be no answer-duration, custom-channel, password, or Publish control. The bare Q/A HUD must remain in-session.
 - In Settings, check the compact `Scale` and `Font` rows: left labels, native Edit Mode slider with a gold value on the right, and dark arrow font picker. Drag or step Scale through 50–200% in 5% steps; the preview must resize immediately, before releasing the mouse. Search/scroll the font list and choose an entry: prompt, answers and score must use it immediately, rewrapping as needed. Close with Escape, an outside click or a tab switch. Selection and deadline must remain unchanged. Reload to check persistence; disable/re-enable a font provider to check fallback and restoration.
+- Test `Volume` at 100%, 50%, 10% and 0% during streak announcements (`/oqdev toasts` in a source checkout). Nonzero changes must let the current clip finish and affect the next; muting must stop it immediately while the toast/queue continue. Unmuting must not replay it. Check the shine follows the transparent burst, voices finish without overlap, other game sounds/HUD layout stay unchanged, and the saved level survives reload.
 - Inspect the HUD outline, timer, dividers, input text and thin scrollbars at 55%, 100% and 200% Q/A scale. Move both windows and change resolution without changing UI scale: settled edges and divider joins must stay sharp, with no seams or half-pixel drift. In `/oqdev games`, scroll to the last row and test slow thumb drags; scrolling should reach the end and settle without jitter. Native dropdowns and slider art should retain Blizzard's appearance.
 - Complete more than one full cycle using a small repeating pack with Warcraft Lore's rules. Confirm three-second results, shuffled cycles, no immediate boundary repeat for a multi-question pack, and Stop ending progression. Use predictable answers to verify the consecutive-correct bonus grows by 0.1 from the second correct answer, caps at 0.5, resets after a wrong answer or skip, and survives a voided question without growing.
+- In a repeating test pack, answer eleven questions correctly as host and participant. Neither clicks nor the first four results should announce; verify each milestone/MP3 above and Godlike on both ten and eleven. Both clients must see both names, with serialized sound and no Q/A movement. Let one player answer wrong or skip while the other continues: the latter must still announce. Verify SFX mute, long realm names, font/scale changes, screen-edge placement, pause/leave cleanup and no replay on result refresh/reconnect. Listen in-game: offline checks cannot verify decoding, loudness or native animation appearance.
 - Answer as host and participant; switch choices and back before expiry. Confirm the final accepted choice/time controls points and the fastest-correct popup; identical clicks do not retime. Compare an early wrong answer (about −1.0) to a late wrong answer (−0.5); only the final selection incurs a penalty, and skipping incurs none. Verify negative totals, same-round reconnect timing and late-change rejection. Timer expiry alone must not reveal correctness or animate either result before the host confirms it; reopening `/oq` or reconnecting to that result must not replay feedback.
 - Open `/oq`, drag the HUD to the top/bottom and left/center/right, then close `/oq`. Confirm alignment/growth, saved position, bounded long content, and that the active HUD stays visible but cannot be dragged. The edit outline must add no text or change the layout. Check a different UI scale, the two-pixel bar thickness, and that the score stays on-screen without overlapping the prompt. It should fade before the next question and cancel on leaving, pausing or dragging. Reload and check the saved position.
 - Leave/rejoin and switch to a second host, including from hosting your own game. Confirm only the new game drives the widget. Try an unavailable/full game and confirm a useful timeout rather than a false connection.

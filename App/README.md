@@ -14,7 +14,7 @@ Keep WoW events and user commands at the application boundary while game rules, 
 
 `Runtime.lua` owns `Quiz.Main`: `ADDON_LOADED` binds SavedVariables and communication callbacks; `PLAYER_LOGIN` starts discovery and the ticker. Slash commands and UI actions enter the same host lifecycle. The ticker advances readiness, author-defined answer/reveal deadlines, transport retries and interruption recovery.
 
-Host closure takes results from the game, records personal receipts, and queues participant receipts before revealing. Finite quizzes finish after their final reveal. Runtime also supplies the media-change callback to `UI/Media.lua`, applying widget settings and refreshing the settings view only after successful initialization.
+Host closure takes results from the game, records personal receipts, and queues participant receipts before revealing. `GetHostView` exposes committed group streak milestones alongside personal feedback; UI never derives awards from a click. Finite quizzes finish after their final reveal. Runtime supplies the media-change callback to `UI/Media.lua`, refreshing appearance only after successful initialization.
 
 ## Gotchas
 

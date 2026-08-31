@@ -18,16 +18,17 @@ The repository is organized by responsibility:
     Game/                 Pack registry, rules, scoring, and quiz state
     Network/              Identity, addon-message transport, sessions, discovery
     Data/                 Saved settings, personal scores, historical archives
-    UI/                   Setup window, answer widget, reusable controls, fonts
+    UI/                   Setup window, answer widget, streak toasts, controls, fonts
+    Assets/               Bundled media
     Packs/WarcraftLore/    Bundled questions, registration, and provenance
     Dev/                  Source-only preview, tests, companion-addon example
     Docs/                 Player and pack-author guides
     Libs/                 Unmodified embedded SharedMedia dependencies
     .github/workflows/    Validation, alpha tagging, and publishing
 
-`Orbit-Quiz.toc` owns the framework's load order: libraries → namespace/text → rules/registry/content → scoring/storage/model → networking/UI → runtime. Source checkouts load the development preview last; packaged releases omit it. Third-party quiz addons load their files through their own TOCs.
+`Orbit-Quiz.toc` owns the framework's load order: libraries → namespace/text → rules/registry/content → scoring/storage/model → networking/UI → runtime. Source checkouts load the development preview last; packaged releases omit it. Third-party quiz addons load their files through their own TOCs. Addon-list branding uses the bundled `Assets/Orbit.png`, never an Orbit installation.
 
-`App/Runtime.lua` composes gameplay, networking, persistence and presentation. `Game/` owns author rules and host-observed outcomes; `Network/` carries validated questions/results; `Data/` retains confirmed personal progress. `UI/` renders these owners' state. Media changes notify the application through a callback rather than reaching into UI consumers.
+`App/Runtime.lua` composes gameplay, networking, persistence and presentation. `Game/` owns author rules and host-observed outcomes; `Network/` carries validated questions/results; `Data/` retains confirmed personal progress. `UI/` renders these owners' state, including animated group streak announcements using bundled `Assets/Sounds` clips. Media changes notify the application through a callback rather than reaching into UI consumers.
 
 The public `OrbitQuiz:RegisterQuestionPack` API connects independently maintained quiz addons through their own `## Dependencies: Orbit-Quiz` TOCs. Authors use their own folders/repositories and releases; no core contribution or TOC edit is required. The [authoring guide](Docs/PACKS.md) includes complete starter files and the [copyable template](Dev/Examples/Orbit-Quiz-Pack-Example/README.md) is self-contained.
 
@@ -35,7 +36,7 @@ Warcraft Lore contains 1,183 game-based questions with four to six choices. Its 
 
 ## Gotchas
 
-- All participants need protocol 7. Sessions support the host plus 16 remote players; realm/channel restrictions can prevent discovery or whispers across realms. There is no Battle.net relay.
+- All participants need protocol 8. Sessions support the host plus 16 remote players; realm/channel restrictions can prevent discovery or whispers across realms. There is no Battle.net relay.
 - Only host-confirmed closed results award points. This is trusted social play, not anti-cheat or latency-compensated competition; personal statistics are not verified rankings.
 - Question packs are trusted executable Lua, loaded through companion-addon TOCs. WoW cannot discover arbitrary JSON/YAML/text files; keep custom packs outside the core addon so updates do not overwrite them.
 - Store schema 6, personal-score schema 2, stable pack IDs, rule identities, and historical scoring are independent contracts. A folder cleanup must not migrate or rescore saved data.

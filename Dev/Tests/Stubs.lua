@@ -1,4 +1,12 @@
 local SERVER_EPOCH = 1788048000
+local SOUND_DURATIONS = {
+    dominating = 1.700091,
+    ownage = 2.586122,
+    rampage = 1.959184,
+    ["wicked-sick"] = 2.586122,
+    holyshit = 2.241859,
+    godlike = 1.744490,
+}
 
 Test = {
     now = 100,
@@ -16,9 +24,17 @@ Test = {
     fontStringCreations = 0,
     fontObjectCreations = 0,
     textureCreations = 0,
+    maskCreations = 0,
     fontWidths = {},
     invalidFonts = {},
     errors = {},
+    soundCalls = {},
+    stoppedSounds = {},
+    soundHandles = {},
+    soundSequence = 0,
+    soundClock = 0,
+    soundDeadlines = {},
+    soundChecks = 0,
     colorCreations = 0,
     cursorX = 0,
     cursorY = 0,
@@ -190,6 +206,51 @@ function GetTime()
     return Test.now
 end
 
+function PlaySoundFile(path, channel)
+    assert(type(path) == "string" and path ~= "", "sound playback needs an asset path")
+    assert(channel == "SFX", "streak announcements respect the SFX channel")
+    Test.soundCalls[#Test.soundCalls + 1] = { path = path, channel = channel, time = Test.now }
+    if Test.soundFailure == "throw" then
+        error("simulated native sound asset failure")
+    end
+    if Test.soundMuted or Test.soundFailure then
+        return false
+    end
+    Test.soundSequence = Test.soundSequence + 1
+    local handle = Test.soundSequence
+    Test.soundHandles[handle] = true
+    local stem = path:match("([^\\]+)%.%w+$")
+    stem = stem and stem:gsub("%-%d+$", "")
+    local duration = Test.soundDuration or SOUND_DURATIONS[stem] or math.huge
+    Test.soundDeadlines[handle] = Test.soundClock + duration + (Test.soundDelay or 0)
+    return true, handle
+end
+
+function StopSound(handle)
+    assert(type(handle) == "number", "only an owned sound handle can be stopped")
+    Test.stoppedSounds[#Test.stoppedSounds + 1] = handle
+    Test.soundHandles[handle] = nil
+    Test.soundDeadlines[handle] = nil
+end
+
+function Test.AdvanceAudio(seconds)
+    assert(type(seconds) == "number" and seconds >= 0, "audio time must advance forward")
+    Test.soundClock = Test.soundClock + seconds
+    for handle, deadline in pairs(Test.soundDeadlines) do
+        if Test.soundClock >= deadline then
+            Test.soundHandles[handle], Test.soundDeadlines[handle] = nil, nil
+        end
+    end
+end
+
+C_Sound = {
+    IsPlaying = function(handle)
+        assert(type(handle) == "number", "native playback checks require a sound handle")
+        Test.soundChecks = Test.soundChecks + 1
+        return Test.soundHandles[handle] == true
+    end,
+}
+
 function GetCursorPosition()
     return Test.cursorX, Test.cursorY
 end
@@ -330,10 +391,10 @@ C_ChatInfo = {
         assert(not Test.restricted, "sent addon message while chat was restricted")
         assert(Test.addonPrefixes[prefix], "addon prefix was not registered")
         assert(type(text) == "string" and #text <= 255, "invalid addon message")
-        if prefix == "ORBITQUIZ7" then
+        if prefix == "ORBITQUIZ8" then
             assert(channel == "WHISPER", "game payloads must use targeted whispers")
         else
-            assert(prefix == "ORBITQUIZDISC7", "unknown addon prefix")
+            assert(prefix == "ORBITQUIZDISC8", "unknown addon prefix")
             assert(
                 channel == "WHISPER"
                     or channel == "CHANNEL"
@@ -427,6 +488,16 @@ function Animation:GetRegionParent()
     return self.parent.parent
 end
 
+function Animation:SetTarget(target)
+    assert(type(target) == "table" and target.kind, "native animations target a script object")
+    self.target = target
+    return true
+end
+
+function Animation:GetTarget()
+    return self.target or self:GetRegionParent()
+end
+
 function Animation:SetOffset(x, y)
     assert(self.kind == "Translation", "offsets belong to a native Translation animation")
     self.offsetX, self.offsetY = x, y
@@ -434,6 +505,39 @@ end
 
 function Animation:GetOffset()
     return self.offsetX, self.offsetY
+end
+
+function Animation:SetScaleFrom(x, y)
+    assert(self.kind == "Scale", "scale endpoints belong to a native Scale animation")
+    assert(type(x) == "number" and type(y) == "number", "native scale endpoints require both axes")
+    self.scaleFromX, self.scaleFromY = x, y
+end
+
+function Animation:GetScaleFrom()
+    return self.scaleFromX or 1, self.scaleFromY or 1
+end
+
+function Animation:SetScaleTo(x, y)
+    assert(self.kind == "Scale", "scale endpoints belong to a native Scale animation")
+    assert(type(x) == "number" and type(y) == "number", "native scale endpoints require both axes")
+    self.scaleToX, self.scaleToY = x, y
+end
+
+function Animation:GetScaleTo()
+    return self.scaleToX or 1, self.scaleToY or 1
+end
+
+function Animation:SetOrigin(point, x, y)
+    assert(self.kind == "Scale", "the mock only implements origins for Scale animations")
+    assert(
+        type(point) == "string" and type(x) == "number" and type(y) == "number",
+        "origin requires a point and offsets"
+    )
+    self.originPoint, self.originX, self.originY = point, x, y
+end
+
+function Animation:GetOrigin()
+    return self.originPoint or "CENTER", self.originX or 0, self.originY or 0
 end
 
 local AnimationGroup = {}
@@ -444,7 +548,10 @@ function AnimationGroup:GetParent()
 end
 
 function AnimationGroup:CreateAnimation(kind, name, template)
-    assert(kind == "Translation" or kind == "Alpha", "mock only implements the native animation types in use")
+    assert(
+        kind == "Translation" or kind == "Alpha" or kind == "Scale",
+        "mock only implements native animation types in use"
+    )
     assert(template == nil, "mock animations do not implement native templates")
     local animation = setmetatable({
         kind = kind,
@@ -489,12 +596,21 @@ function AnimationGroup:GetScript(name)
 end
 
 function AnimationGroup:SetLooping(looping)
-    assert(looping == "NONE", "mock only advances one-shot native groups")
+    assert(looping == "NONE" or looping == "REPEAT", "mock only advances one-shot or repeating native groups")
     self.looping = looping
 end
 
 function AnimationGroup:GetLooping()
     return self.looping
+end
+
+function AnimationGroup:SetToFinalAlpha(enabled)
+    assert(type(enabled) == "boolean", "native final-alpha mode is a boolean")
+    self.toFinalAlpha = enabled
+end
+
+function AnimationGroup:IsSetToFinalAlpha()
+    return self.toFinalAlpha == true
 end
 
 function AnimationGroup:IsPlaying()
@@ -548,12 +664,44 @@ end
 
 function Test.AdvanceAnimations(seconds)
     assert(type(seconds) == "number" and seconds >= 0, "animation time must advance forward")
+    local advancing = {}
     for _, group in ipairs(Test.animationGroups) do
         if group.playing then
+            advancing[#advancing + 1] = { group = group, plays = group.playCalls }
+        end
+    end
+    Test.AdvanceAudio(seconds)
+    for _, entry in ipairs(advancing) do
+        local group = entry.group
+        if group.playing and group.playCalls == entry.plays then
             group.elapsed = group.elapsed + seconds
-            if group.elapsed >= group:GetDuration() then
+            local duration = group:GetDuration()
+            if group.looping == "REPEAT" then
+                assert(duration > 0, "repeating native groups need a positive duration")
+                group.elapsed = group.elapsed % duration
+            elseif group.elapsed >= duration then
                 group.playing = false
                 group.finishCalls = group.finishCalls + 1
+                if group.toFinalAlpha then
+                    local finalAlphas = {}
+                    for _, animation in ipairs(group.animations) do
+                        if animation.kind == "Alpha" then
+                            local target, previous = animation:GetTarget(), finalAlphas[animation:GetTarget()]
+                            local finish = animation.startDelay + animation.duration + animation.endDelay
+                            if
+                                not previous
+                                or animation.order > previous.order
+                                or animation.order == previous.order and finish >= previous.finish
+                            then
+                                finalAlphas[target] =
+                                    { order = animation.order, finish = finish, alpha = animation.toAlpha }
+                            end
+                        end
+                    end
+                    for target, final in pairs(finalAlphas) do
+                        target:SetAlpha(final.alpha)
+                    end
+                end
                 if group.scripts.OnFinished then
                     group.scripts.OnFinished(group, false)
                 end
@@ -853,10 +1001,12 @@ function Widget:GetStatusBarColor()
     return unpack(self.statusBarColor or { 1, 1, 1, 1 })
 end
 
-function Widget:SetAtlas(atlas, useAtlasSize)
+function Widget:SetAtlas(atlas, useAtlasSize, filterMode, resetTexCoords, wrapHorizontal, wrapVertical)
     assert(type(atlas) == "string" and atlas ~= "", "atlas must be named")
     self.atlas, self.useAtlasSize = atlas, useAtlasSize
     self.color, self.texture = nil, nil
+    self.filterMode, self.resetTexCoords = filterMode, resetTexCoords
+    self.wrapHorizontal, self.wrapVertical = wrapHorizontal, wrapVertical
 end
 
 function Widget:GetAtlas()
@@ -1026,6 +1176,32 @@ function Widget:CreateTexture(name, layer, template, sublevel)
     self.textures = self.textures or {}
     self.textures[#self.textures + 1] = texture
     return texture
+end
+
+function Widget:CreateMaskTexture(name, layer, template, sublevel)
+    Test.maskCreations = Test.maskCreations + 1
+    local mask = NewWidget("MaskTexture", name, self)
+    mask.template, mask.drawLayer, mask.drawSublevel = template, layer, sublevel
+    self.maskTextures = self.maskTextures or {}
+    self.maskTextures[#self.maskTextures + 1] = mask
+    return mask
+end
+
+function Widget:AddMaskTexture(mask)
+    assert(self.kind == "Texture" and mask.kind == "MaskTexture", "mask attachment requires native textures")
+    self.masks = self.masks or {}
+    for _, attached in ipairs(self.masks) do
+        if attached == mask then
+            return
+        end
+    end
+    assert(#self.masks < 3, "native textures accept at most three masks")
+    self.masks[#self.masks + 1] = mask
+end
+
+function Widget:GetMaskTexture(index)
+    assert(self.kind == "Texture", "only textures have attached masks")
+    return self.masks and self.masks[index]
 end
 
 function Widget:SetTextInsets(...)
@@ -1798,6 +1974,19 @@ function CreateFramePool(kind, parent, template, resetter)
         frame = frame or CreateFrame(kind, nil, parent, template)
         self.active[frame] = true
         return frame, isNew
+    end
+    function pool:Release(frame)
+        if not self.active[frame] then
+            return
+        end
+        self.active[frame] = nil
+        if resetter then
+            resetter(self, frame)
+        else
+            frame:Hide()
+            frame:ClearAllPoints()
+        end
+        self.inactive[#self.inactive + 1] = frame
     end
     function pool:ReleaseAll()
         for frame in pairs(self.active) do

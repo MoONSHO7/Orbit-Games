@@ -5,6 +5,7 @@ local MAX_QUESTIONS = 50
 local LEGACY_SCORING_VERSION = 2
 local MAX_SAFE_INTEGER = 9007199254740991
 local MAX_IDENTITY_LENGTH = 128
+local MIN_STREAK_MILESTONE = 5
 
 local Game = {}
 Game.__index = Game
@@ -329,7 +330,7 @@ function Game:CloseQuestion(now, multiplayer)
         return nil, "before_deadline"
     end
     local round = self.round
-    local answers, correctCount, fastest = {}, 0, nil
+    local answers, streakMilestones, correctCount, fastest = {}, {}, 0, nil
     for guid, player in pairs(self.players) do
         if not round.answers[guid] then
             player.streak = 0
@@ -353,6 +354,9 @@ function Game:CloseQuestion(now, multiplayer)
         if answer.correct then
             player.correct = player.correct + 1
             correctCount = correctCount + 1
+            if player.streak >= MIN_STREAK_MILESTONE then
+                streakMilestones[#streakMilestones + 1] = { name = answer.name, streak = player.streak }
+            end
         else
             player.incorrect = player.incorrect + 1
         end
@@ -365,6 +369,12 @@ function Game:CloseQuestion(now, multiplayer)
             return left.elapsed < right.elapsed
         end
         return left.guid < right.guid
+    end)
+    table.sort(streakMilestones, function(left, right)
+        if left.streak ~= right.streak then
+            return left.streak > right.streak
+        end
+        return left.name:lower() < right.name:lower()
     end)
     local result = {
         id = round.id,
@@ -392,6 +402,7 @@ function Game:CloseQuestion(now, multiplayer)
         totalAnswers = #answers,
         fastestName = fastest and fastest.name or nil,
         fastestElapsed = fastest and fastest.elapsed or nil,
+        streakMilestones = streakMilestones,
     }
     self.completed = self.completed + 1
     result.complete = not self.continuous and self.completed >= self.total

@@ -5,7 +5,7 @@ local OTHER_HOST = "Different-ForeignRealm"
 local PEER = "Participant-TestRealm"
 local SESSION_ID = "protocol-session.1"
 local EXPLANATION = "The private explanation appears only after the question closes."
-local PREFIX = "ORBITQUIZ7"
+local PREFIX = "ORBITQUIZ8"
 local PACK_TITLE = "Session regression questions"
 local FRAGMENT_BYTES = 200
 
@@ -292,7 +292,8 @@ return function(Quiz)
             fastestElapsed and string.format("%.17g", fastestElapsed) or "",
             assert(Quiz.Rules.Encode(rules)),
             streak,
-            Quiz.Scoring.StreakBonus(rules, streak)
+            Quiz.Scoring.StreakBonus(rules, streak),
+            ""
         )
     end
 
@@ -449,7 +450,7 @@ return function(Quiz)
     Main:CloseQuestion(Test.now)
     Same(Main.game.state, "results", "host finalizes the authoritative result")
     local result = One("R", PEER)
-    Same(#result, 22, "result carries per-pack rules, streak accounting and finalized winner metadata")
+    Same(#result, 23, "result carries rules, streak accounting and compact group milestones")
     Same(result[4], tostring(round.correctIndex), "correct choice is first revealed in the result")
     Same(result[10], EXPLANATION, "explanation is revealed only after close")
     Same(result[11], PACK_ID, "result retains question-pack identity")
@@ -1625,6 +1626,182 @@ return function(Quiz)
         Unchanged(Changed(skipped, 22, "0.1"), "an unanswered result cannot fabricate streak points")
         Incoming(skipped)
         Same(Session.view.points, nil, "maximum-rule unanswered results retain no invented answer or points")
+    end
+
+    do
+        client, view = Client(1800)
+        local ownName = Quiz.Identity.name
+        local function Name(id, name, request)
+            return Fields("N", SESSION_ID, request or client.request, id, name)
+        end
+        local result = Changed(ResultFields(1800, 2, 2, 2.5, 72.5, 2, 2, "", 0, 4, nil, nil, nil, 5), 23, "1:5,2:10")
+        Unchanged(Name(1, ownName, "old-request.1"), "old membership cannot install milestone names")
+        Unchanged(Name(1, ownName), "another native sender cannot supply milestone names", OTHER_HOST)
+        Unchanged(Changed(Name(1, ownName), 2, "different-session"), "another session cannot install milestone names")
+        for _, name in ipairs({ "", "Shortname", "Name With Spaces-Realm", "Name-Realm|cff00ff00", "<Forged>-Realm" }) do
+            Unchanged(Name(1, name), "noncanonical or unsafe milestone names are rejected")
+        end
+        Incoming(Name(1, ownName))
+        Same(
+            client.streakSpeakers.entries[1].name,
+            ownName,
+            "name dictionary stores only a normalized host-provided identity"
+        )
+        Same(view.streakMilestones, nil, "name prefetch never announces a provisional streak")
+        Comms:Clear()
+        Unchanged(Name(1, HOST), "a known speaker ID cannot be rebound to another player")
+        Unchanged(Name(2, ownName), "one player cannot occupy several current-generation speaker IDs")
+        Unchanged(
+            Fields("N", SESSION_ID, client.request, "2,3", HOST .. ",Bad Name-Realm"),
+            "a malformed name batch rejects atomically"
+        )
+        Same(
+            client.streakSpeakers.entries[2],
+            nil,
+            "a rejected batch cannot partially install its valid first identity"
+        )
+        Unchanged(
+            Fields("N", SESSION_ID, client.request, "3,2", HOST .. ",Other-Realm"),
+            "out-of-order batch IDs are not canonical"
+        )
+        Unchanged(
+            Fields("N", SESSION_ID, client.request, "2,3,4,5,6", "A-Realm,B-Realm,C-Realm,D-Realm,E-Realm"),
+            "name batches are capped at four identities"
+        )
+        for _, encoded in ipairs({
+            "0:5",
+            "01:5",
+            "1:4",
+            "1:05",
+            "1:5,1:6",
+            "2:6,1:5",
+            "1:5,",
+            ",1:5",
+            "1:5,,2:6",
+            "1:5x",
+            "1:nan",
+            "1:5,2:6,3:7",
+            "1:9007199254740991",
+            string.rep("1", 600),
+        }) do
+            Unchanged(
+                Changed(result, 23, encoded),
+                "malformed or excessive group streak metadata rejects transactionally"
+            )
+        end
+        Incoming(result)
+        Same(view.state, "results", "a missing name-map packet never blocks the verified score result")
+        Same(view.points, 2.5, "the score persists without any presentation dictionary dependency")
+        Same(#view.streakMilestones, 1, "an incomplete dictionary exposes only its verified display identities")
+        Same(view.streakMilestones[1].name, ownName, "a missing unrelated name does not suppress known milestones")
+        Same(
+            Quiz.PersonalScores:GetPack(PACK_ID).answers,
+            1,
+            "unresolved presentation data awards the one valid answer"
+        )
+        Comms:Clear()
+        Quiz.StreakSync:TickClient(client, view, Test.now)
+        Same(One("U", HOST)[4], "2", "the participant requests only its missing current-result speaker")
+        Incoming(Name(2, HOST))
+        Same(#view.streakMilestones, 2, "a lost name map can complete the current committed group result")
+        Same(view.streakMilestones[1].name, HOST, "milestone batches put the highest streak first")
+        Same(view.streakMilestones[1].streak, 10, "decoded group counts retain the full ten-plus streak")
+        Same(view.streakMilestones[2].name, ownName, "a player sees their own confirmed milestone with the group")
+        Same(view.suppressStreakToasts, false, "a fresh current-round result is eligible for milestone presentation")
+        local milestones = view.streakMilestones
+        Incoming(result)
+        Same(view.streakMilestones, milestones, "a duplicate receipt cannot replace the immutable presentation batch")
+        Comms:Clear()
+        Unchanged(Changed(result, 23, "1:5,2:11"), "a duplicate round cannot change another player's milestone")
+        Same(Quiz.PersonalScores:GetPack(PACK_ID).answers, 1, "milestone maps and receipt replays never award again")
+        Incoming(Question(1801))
+        Incoming(Name(2, HOST))
+        Same(
+            Session.view.streakMilestones,
+            nil,
+            "a delayed name map cannot attach the previous round's toast to a new question"
+        )
+        Incoming(result)
+        Same(
+            Session.view.streakMilestones,
+            nil,
+            "historical retained results do not rewind the active question's toast batch"
+        )
+
+        client, view = Client(1810)
+        local replay = Changed(ResultFields(1810, 2, 2, 2.5, 72.5, 1, 1, "", 0, 4, nil, nil, nil, 5), 23, "1:5")
+        Incoming(replay)
+        Same(view.correctIndex, 2, "result without dictionary still establishes authoritative correctness")
+        Session:SetRestricted(true)
+        Test.now = Test.now + 1
+        Session:SetRestricted(false)
+        local previousRequest = client.request
+        Incoming(Fields("W", previousRequest, SESSION_ID, LEAGUE, "72.5"))
+        Incoming(Question(1810))
+        Incoming(Fields("N", SESSION_ID, previousRequest, 1, Quiz.Identity.name))
+        Same(
+            Session.view.suppressStreakToasts,
+            true,
+            "same-round membership recovery suppresses historical celebrations"
+        )
+        Same(
+            Session.view.streakMilestones[1].streak,
+            5,
+            "resync may retain descriptive milestones without replay permission"
+        )
+        Same(Quiz.PersonalScores:GetPack(PACK_ID).answers, 1, "resync never reapplies the associated score")
+
+        client, view = Client(1820)
+        for id = 1, 100 do
+            local name = "Speaker"
+                .. string.char(65 + math.floor((id - 1) / 26))
+                .. string.char(65 + (id - 1) % 26)
+                .. "-Realm"
+            Incoming(Fields("N", SESSION_ID, client.request, id, name))
+        end
+        Same(client.streakSpeakers.count, 36, "a new 64-ID generation replaces rather than grows the client dictionary")
+        Check(Count(client.streakSpeakers.entries) <= 64, "bounded speaker bookkeeping matches its actual table")
+        Comms:Clear()
+        Unchanged(
+            Fields("N", SESSION_ID, client.request, 1, "Replacement-Realm"),
+            "evicted old IDs cannot be rebound later"
+        )
+
+        round = Host()
+        peer = Peer()
+        Drain()
+        Session:Tick(Test.now)
+        local names = Queued("N", PEER)
+        Same(#names, 1, "idle transport prewarms one small name message at a time")
+        local nameFields = names[1].fields
+        local firstSpeakerId = tonumber(nameFields[4]:match("^%d+"))
+        Same(#nameFields, 5, "name metadata stays separate from the score receipt")
+        Incoming(Fields("B", Session.hostSession, "old-request.1", nameFields[4]), PEER)
+        Same(peer.streakAcknowledged[firstSpeakerId], nil, "old membership cannot acknowledge a speaker map")
+        Incoming(Fields("B", Session.hostSession, peer.request, nameFields[4]), PEER)
+        Same(peer.streakAcknowledged[firstSpeakerId], true, "the current peer acknowledges its received identity map")
+        Comms:Clear()
+        Check(Comms:Send(PEER, { "T", "busy", "busy" }), "a gameplay packet occupies the outbox")
+        Session:Tick(Test.now + 1)
+        Same(#Queued("N", PEER), 0, "name prefetch cannot add traffic ahead of queued gameplay")
+        Comms:Clear()
+        for id = 1, 100 do
+            local name = "Guest"
+                .. string.char(65 + math.floor((id - 1) / 26))
+                .. string.char(65 + (id - 1) % 26)
+                .. "-Realm"
+            Check(Quiz.StreakSync:Register(Session, name), "bounded host dictionary assigns a monotonic speaker ID")
+        end
+        Check(Session.streakSpeakers.count <= 64, "host identity-cache rotation does not grow with session churn")
+        Check(Session.streakSpeakers.sequence > 100, "rotating a dictionary never reuses an old speaker ID")
+        Check(
+            Session.streakSpeakers.byName[Quiz.Identity.name:lower()],
+            "dictionary rotation retains the host identity"
+        )
+        Check(
+            Session.streakSpeakers.byName[PEER:lower()],
+            "dictionary rotation retains every active participant identity"
+        )
     end
 
     client, view = Client(80)

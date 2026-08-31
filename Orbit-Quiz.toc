@@ -6,6 +6,7 @@
 ## X-Curse-Project-ID: 1676376
 ## SavedVariables: OrbitQuizDB
 ## OptionalDeps: LibSharedMedia-3.0, SharedMedia, SharedMedia_MyMedia
+## IconTexture: Interface\AddOns\Orbit-Quiz\Assets\Orbit.png
 ## Category: Orbit UI
 
 Libs\LibStub\LibStub.lua
@@ -37,12 +38,14 @@ UI\Media.lua
 Game\Game.lua
 Network\Identity.lua
 Network\Transport.lua
+Network\Streaks.lua
 Network\Session.lua
 Network\Discovery.lua
 UI\ScrollBar.lua
 UI\Controls.lua
 UI\FontPicker.lua
 UI\SettingsControls.lua
+UI\StreakToasts.lua
 UI\Widget.lua
 UI\Setup.lua
 App\Runtime.lua

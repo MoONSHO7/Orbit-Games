@@ -37,8 +37,26 @@ local MAX_KNOWN_QUESTIONS = 32
 local MILLISECONDS = 1000
 local POINT_SCALE = 10
 local MAX_SCORE = math.floor(MAX_INTEGER / POINT_SCALE)
-local MESSAGE_FIELDS =
-    { J = 2, W = 5, S = 3, D = 4, O = 4, A = 6, K = 7, E = 6, R = 22, F = 4, P = 4, H = 5, T = 3, L = 3, X = 2 }
+local MESSAGE_FIELDS = {
+    J = 2,
+    W = 5,
+    S = 3,
+    D = 4,
+    O = 4,
+    A = 6,
+    K = 7,
+    E = 6,
+    R = 23,
+    F = 4,
+    P = 4,
+    H = 5,
+    T = 3,
+    L = 3,
+    X = 2,
+    N = 5,
+    B = 4,
+    U = 4,
+}
 local HOST_STATES = { ready = true, posting = true, open = true, results = true, paused = true }
 local ANSWER_ERRORS = {
     not_open = true,
@@ -218,6 +236,7 @@ local function RenewMembership(client, view, now)
     client.lastHeard, client.nextJoin = now, now + JOIN_RETRY
     client.nextHeartbeat, client.nextSyncAt = now + HEARTBEAT_INTERVAL, now + SYNC_INTERVAL
     view.selected, view.confirmedSelected, view.pending, view.locked = nil, nil, false, true
+    view.suppressStreakToasts = view.suppressStreakToasts or view.correctIndex ~= nil
 end
 
 local function Choice(input, choices)
@@ -246,6 +265,7 @@ function Session:Initialize()
     self.hostSession = nil
     self.resultRecipients, self.resultRecipientCount, self.resultCount = {}, 0, 0
     self.restricted = false
+    Quiz.StreakSync:Initialize(self)
     self.view = { role = "idle", state = "idle", hostName = Quiz.Store:GetSettings().hostName }
 end
 
@@ -294,6 +314,8 @@ function Session:StartHost(sessionId)
     self.retiredRequests, self.retiredCount = {}, 0
     self.resultRecipients, self.resultRecipientCount, self.resultCount = {}, 0, 0
     self.nextHeartbeat = GetTime() + HEARTBEAT_INTERVAL
+    Quiz.StreakSync:Initialize(self)
+    Quiz.StreakSync:Register(self, Quiz.Identity.name)
     Quiz.Discovery:Advertise()
 end
 
@@ -441,6 +463,7 @@ function Session:SubmitAnswer(input)
 end
 
 function Session:CancelRoundMessages()
+    Quiz.Comms:Cancel("streak-name")
     for _, peer in pairs(self.peers) do
         Quiz.Comms:Cancel(PeerTag(peer.name))
         Quiz.Comms:Cancel(AnswerTag(peer.name))
@@ -553,7 +576,8 @@ function Session:SendResult(peer)
             result.fastestElapsed and string.format("%.17g", result.fastestElapsed) or "",
             result.rulesKey,
             answer and answer.streak or 0,
-            ScoreText(answer and answer.streakBonus or 0)
+            ScoreText(answer and answer.streakBonus or 0),
+            Quiz.StreakSync:Encode(self, result)
         )
         entry = { id = result.id, fields = fields, expiresAt = now + RESULT_TTL, nextRetryAt = 0 }
         recipient.entries[result.id] = entry
@@ -765,7 +789,9 @@ function Session:ReceiveHost(sender, fields, now)
                 return
             end
             peer = { name = sender, playerKey = Quiz.Main:PlayerKey(sender), lastSeen = now }
+            Quiz.StreakSync:ResetPeer(peer)
             self.peers[key] = peer
+            Quiz.StreakSync:Register(self, sender)
         end
         if not peer.lastWelcome or now - peer.lastWelcome >= SYNC_INTERVAL then
             if peer.request ~= fields[2] then
@@ -778,6 +804,7 @@ function Session:ReceiveHost(sender, fields, now)
                 peer.lastOpenId, peer.lastLockId, peer.lastResultId = nil, nil, nil
                 peer.lastResultAckId = nil
                 peer.answerRevision, peer.answerVersion = 0, 0
+                Quiz.StreakSync:ResetPeer(peer)
             end
             peer.lastWelcome, peer.lastSeen = now, now
             Quiz.Comms:Send(
@@ -811,6 +838,12 @@ function Session:ReceiveHost(sender, fields, now)
         return
     end
     local game = Quiz.Main.game
+    if code == "B" or code == "U" then
+        if Quiz.StreakSync:ReceiveHost(self, peer, fields, now) then
+            peer.lastSeen = now
+        end
+        return
+    end
     if
         (code == "T" or code == "S") and fields[3] ~= peer.request
         or code == "D" and fields[4] ~= peer.request
@@ -998,6 +1031,7 @@ function Session:ReceiveResult(fields, now)
     local fastestElapsed = fields[19] ~= "" and Elapsed(fields[19], duration) or nil
     local streak = Integer(fields[21], 0, MAX_INTEGER)
     local streakBonus = Score(fields[22])
+    local streakReferences = count and Quiz.StreakSync:Decode(fields[23], count)
     if
         not id
         or not correct
@@ -1013,6 +1047,7 @@ function Session:ReceiveResult(fields, now)
         or not duration
         or not streak
         or not streakBonus
+        or not streakReferences
         or client.rulesKey and client.rulesKey ~= fields[20]
         or fields[5] ~= "" and not selected
         or fields[6] ~= "" and not points
@@ -1045,6 +1080,7 @@ function Session:ReceiveResult(fields, now)
         and (
             previousResult[18]:lower() ~= fields[18]:lower()
             or Elapsed(previousResult[19], duration) ~= fastestElapsed
+            or previousResult[23] ~= fields[23]
         )
     then
         return false
@@ -1091,12 +1127,15 @@ function Session:ReceiveResult(fields, now)
         if not view.correctIndex then
             view.suppressScoreAnimation = reason == "duplicate"
             view.suppressWinnerPopup = reason == "duplicate"
+            view.suppressStreakToasts = view.suppressStreakToasts or reason == "duplicate"
         end
         view.state, view.correctIndex, view.selected, view.points, view.score =
             "results", correct, selected, points, score
         view.correctCount, view.totalAnswers, view.explanation = count, total, fields[10]
         view.fastestName, view.fastestElapsed = fastestName, fastestElapsed
         view.streak, view.streakBonus = streak, streakBonus
+        view.streakReferences = streakReferences
+        Quiz.StreakSync:RefreshView(client, view)
         view.pending, view.locked, view.notice = false, true, nil
         client.lockSyncId = nil
     end
@@ -1144,7 +1183,11 @@ function Session:ReceiveParticipant(fields, now)
     if client.awaitingWelcome and code ~= "X" then
         return
     end
-    if code == "Q" then
+    if code == "N" then
+        if not Quiz.StreakSync:ReceiveName(client, view, fields) then
+            return
+        end
+    elseif code == "Q" then
         if not self:ReceiveQuestion(fields, now) then
             return
         end
@@ -1332,6 +1375,7 @@ function Session:Tick(now)
                 end
             end
         end
+        Quiz.StreakSync:TickHost(self, now)
     elseif self.client then
         local client, view = self.client, self.view
         if not client.session then
@@ -1388,5 +1432,6 @@ function Session:Tick(now)
                 Quiz.Comms:Send(client.name, Fields("T", client.session, client.request))
             end
         end
+        Quiz.StreakSync:TickClient(client, view, now)
     end
 end

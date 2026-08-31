@@ -2361,6 +2361,15 @@ return function(Quiz)
             Same(Find(result, "Alice").streak, expected, "consecutive state spans complete repeated question cycles")
             Same(Find(result, "Alice").streakBonus, 0.3, "long streaks stop increasing the authored bonus cap")
             Same(Find(result, "Alice").points, 1.3, "capped streak points remain exact tenths")
+            Same(
+                #result.streakMilestones,
+                expected >= 5 and 1 or 0,
+                "only closed streaks from five announce milestones"
+            )
+            if expected >= 5 then
+                Same(result.streakMilestones[1].name, "Alice-Realm", "milestones retain the authoritative player name")
+                Same(result.streakMilestones[1].streak, expected, "every ten-plus correct answer remains a milestone")
+            end
         end
         Begin()
         Answer("Alice", true, 1, "final-1")
@@ -2369,6 +2378,7 @@ return function(Quiz)
         Same(Find(result, "Alice").streak, 0, "a wrong final change breaks even a long streak")
         Same(Find(result, "Alice").streakBonus, 0, "earlier abandoned correct selections cannot retain bonuses")
         Same(Find(result, "Alice").points, -0.5, "streak does not soften the final wrong-answer penalty")
+        Same(#result.streakMilestones, 0, "wrong final selections cannot announce a stale milestone")
         Begin()
         Answer("Alice", true)
         result = Close()
@@ -2377,11 +2387,54 @@ return function(Quiz)
         Begin()
         result = Close()
         Same(result.totalAnswers, 0, "entirely unanswered rounds have no made-up entries")
+        Same(#result.streakMilestones, 0, "unanswered rounds produce no milestone announcements")
         Same(streakGame.players.Alice.streak, 0, "entirely unanswered rounds reset every known player's streak")
         local fresh = Quiz.Game.New({}, Questions(1), KeepOrder, rules)
         Open(fresh, 1, 0)
         fresh:Submit("Alice", "Alice-Realm", 1, 1, 1)
         Same(fresh:CloseQuestion(5).answers[1].streak, 1, "new sessions never inherit personal or prior-game streaks")
+    end
+
+    do
+        local rules = assert(Quiz.Rules.Normalize({ answerSeconds = 5, shuffleChoices = false }))
+        local game = assert(Quiz.Game.New({}, Questions(1), KeepOrder, rules))
+        for id = 1, 4 do
+            Open(game, id, id * 10)
+            game:Submit("Zed", "Zed-Realm", id, 1, id * 10 + 1)
+            game:Submit("Alice", "Alice-Realm", id, 1, id * 10 + 1)
+            local result = game:CloseQuestion(id * 10 + 5)
+            Same(#result.streakMilestones, 0, "the first four correct answers are below the toast threshold")
+        end
+        Open(game, 5, 50)
+        game:Submit("Alice", "Alice-Realm", 5, 1, 51)
+        Same(game.round.streakMilestones, nil, "pending answers do not expose provisional milestones")
+        Check(game:Pause("restricted"), "an otherwise fifth correct selection can be voided")
+        Same(#game.lastResult.streakMilestones, 0, "a void cannot manufacture the fifth milestone")
+        Same(game.players.Alice.streak, 4, "a void leaves the committed pre-milestone streak untouched")
+        Check(game:Resume(), "milestone fixture resumes after the void")
+        Open(game, 6, 60)
+        game:Submit("Zed", "Zed-Realm", 6, 1, 61)
+        game:Submit("Alice", "Alice-Realm", 6, 1, 61)
+        local result = game:CloseQuestion(65)
+        Same(
+            #result.streakMilestones,
+            2,
+            "all qualifying players appear even without scoring bonuses or multiplayer flag"
+        )
+        Same(result.streakMilestones[1].name, "Alice-Realm", "same-tier milestones sort by canonical player name")
+        Same(result.streakMilestones[2].name, "Zed-Realm", "milestone ordering is independent of Lua pairs traversal")
+        Same(result.streakMilestones[1].streak, 5, "only the eventual closed fifth correct answer is announced")
+        Same(result.answers[1].streakBonus, 0, "milestone presentation does not invent a disabled scoring reward")
+        result.answers[1].name = "Changed-Realm"
+        Same(
+            result.streakMilestones[1].name,
+            "Alice-Realm",
+            "milestone identity is detached from mutable answer records"
+        )
+        Open(game, 7, 70)
+        game:Submit("Alice", "Alice-Realm", 7, 2, 71)
+        result = game:CloseQuestion(75)
+        Same(#result.streakMilestones, 0, "wrong and skipped players both disappear from the next milestone batch")
     end
 
     return assertions

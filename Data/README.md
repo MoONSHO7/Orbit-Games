@@ -10,7 +10,7 @@ Keep authoritative receipt accounting and save migrations separate from gameplay
 
 ## Implementation
 
-`Store.lua` owns top-level `OrbitQuizDB` schema 6, setup normalization, independent widget settings/position, persistent question counters and historical league readers. Runtime binds the restored database during the addon's `ADDON_LOADED` event.
+`Store.lua` owns top-level `OrbitQuizDB` schema 6, setup normalization, independent widget settings/position and sound volume, persistent question counters and historical league readers. Runtime binds the restored database during the addon's `ADDON_LOADED` event.
 
 `PersonalScores.lua` owns its own subtree: schema 1→2 migration preserves original scoring-version-2 records while current receipts accumulate by stable pack ID and canonical rules key. Compressed host/session/round identity ranges prevent duplicate credit, including delayed older receipts.
 
@@ -23,7 +23,7 @@ Keep authoritative receipt accounting and save migrations separate from gameplay
 - Invalid, unsupported or capacity-limited saved data must fail without silently resetting it. Existing legacy arithmetic and read migrations remain frozen.
 - Duplicate tracking spans pack/rules combinations within each host/session. Persist the identity alongside credit; do not clear ranges merely because a question left the visible recent history.
 - Returned summaries/rules are detached. UI changes must not mutate canonical saved stats; sorting is case-insensitive title, pack ID, then Original rules before canonical rule keys.
-- Widget placement and appearance save independently from host setup. Reflow alone must not rewrite normalized anchors.
+- Widget placement, appearance and sound volume save independently from host setup and each other. Missing volume defaults to the original loudness without a schema change; malformed values fail atomically. Reflow alone must not rewrite normalized anchors.
 - Retired chat settings/passwords are discarded during normalization. Archived public/whisper data and the internal `PUBLIC` bucket remain storage compatibility contracts, not playable chat modes.
 - Retain archive readers, validation, and legacy fixture-writing behavior during structural cleanup. No schema or global SavedVariables name changes accompany the new folders.
 

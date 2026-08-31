@@ -239,6 +239,7 @@ return function(Quiz)
             defaultRulesKey,
             "1",
             "0.0",
+            "",
         })
         Widget:Refresh()
         Check(Widget.scoreAnimation:IsPlaying(), "confirmed result starts personal feedback once")
@@ -266,6 +267,7 @@ return function(Quiz)
             defaultRulesKey,
             "1",
             "0.0",
+            "",
         })
         Widget:Refresh()
         Stable(before)
