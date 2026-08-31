@@ -1,0 +1,22 @@
+package-as: Orbit-Quiz
+
+externals:
+    Libs/LibStub:
+        url: https://github.com/wowace-clone/LibStub
+        commit: d0d26a9a58eade74964ea95114ca0ab593271b1b
+    Libs/CallbackHandler-1.0:
+        url: https://github.com/wowace-clone/CallbackHandler-1.0
+        commit: ca289bc800ab9e1d625d51c5109d4b273c06d380
+        path: CallbackHandler-1.0
+    Libs/LibSharedMedia-3.0:
+        url: https://github.com/wowace-clone/LibSharedMedia-3.0
+        commit: 7bb1e857a8482768d7401814885f593d77759436
+        path: LibSharedMedia-3.0
+
+enable-nolib-creation: no
+
+ignore:
+    - .tests
+    - Packs/Archive
+    - Development.lua
+    - .styluaignore

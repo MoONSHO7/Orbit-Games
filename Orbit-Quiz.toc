@@ -1,0 +1,53 @@
+## Interface: 120100
+## Title: Orbit-Quiz
+## Notes: Continuous multiplayer quiz widgets with persistent scores and installable question packs.
+## Author: MoONSHO7
+## Version: 0.9
+## SavedVariables: OrbitQuizDB
+## OptionalDeps: LibSharedMedia-3.0, SharedMedia, SharedMedia_MyMedia
+## Category: Orbit UI
+
+Libs\LibStub\LibStub.lua
+Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
+Libs\LibSharedMedia-3.0\LibSharedMedia-3.0.lua
+Init.lua
+Locale.lua
+WidgetLocale.lua
+Packs.lua
+Packs\LoreData.lua
+Packs\LoreRTS.lua
+Packs\LoreClassic.lua
+Packs\LoreBurningCrusade.lua
+Packs\LoreWrath.lua
+Packs\LoreCataclysm.lua
+Packs\LorePandaria.lua
+Packs\LoreDraenor.lua
+Packs\LoreLegion.lua
+Packs\LoreAzeroth.lua
+Packs\LoreShadowlands.lua
+Packs\LoreDragonflight.lua
+Packs\LoreWarWithin.lua
+Packs\LoreMidnight.lua
+Packs\WarcraftLore.lua
+Scoring.lua
+PersonalScores.lua
+Store.lua
+Media.lua
+Game.lua
+Identity.lua
+Comms.lua
+Session.lua
+Discovery.lua
+DialogChrome.lua
+ScrollBar.lua
+Controls.lua
+FontMenu.lua
+FontPicker.lua
+SettingsControls.lua
+Widget.lua
+UI.lua
+Main.lua
+
+#@do-not-package@
+Development.lua
+#@end-do-not-package@
