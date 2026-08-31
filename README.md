@@ -2,79 +2,52 @@
 
 ## Description
 
-A standalone World of Warcraft 12.1.0 quiz addon with a lean, screen-aware answer widget, discovered games, personal per-pack progress, and file-based question packs.
+A standalone World of Warcraft 12.1.0 quiz framework with a lean answer widget, discovered games, personal progress, and file-based question packs.
 
 ## Purpose
 
-Run continuous social quizzes after one Start action. Every player installs Orbit-Quiz and answers through the widget; only the host needs the chosen question packs. Orbit itself is not a dependency.
+Authors define questions and rules; hosts select a quiz and press Start. Every player installs Orbit-Quiz, but only the host needs the selected packs. Orbit itself is not a dependency.
 
-Install the folder as `World of Warcraft/_retail_/Interface/AddOns/Orbit-Quiz/` and enable it on the AddOns screen. Open `/oq` or `/orbitquiz` to host or join a game and position the widget (`host`, `setup`, and `widget` remain panel aliases). See [QUICKSTART.md](QUICKSTART.md) for play and verification, and [PACKS.md](PACKS.md) for question-pack installation and format.
+Install this folder as `World of Warcraft/_retail_/Interface/AddOns/Orbit-Quiz/`. Open `/oq` or `/orbitquiz` to host, join, change appearance, or position the widget. See the [quickstart](Docs/QUICKSTART.md) and [pack-authoring guide](Docs/PACKS.md).
 
 ## Implementation
 
-The TOC loads bundled LibStub, CallbackHandler and LibSharedMedia before the namespace, string registries, question packs, model, identity, transport, session, and UI. `Locale.lua` holds shared/runtime text; `WidgetLocale.lua` adds widget and settings-panel text. `Libs/README.md` records the standalone library contract and pinned sources.
+The repository is organized by responsibility:
 
-`Packs.lua` owns `OrbitQuiz:RegisterQuestionPack`. Companion addons declare `## Dependencies: Orbit-Quiz` and register Lua tables when WoW loads their TOC-listed files. Warcraft Lore content version 2 assembles 1,183 game-based questions through `Packs/LoreData.lua` before one registration. Comic/manga questions live only in an unloaded, package-excluded source archive. Questions carry four to six choices; bundled entries also retain difficulty, era, and a review source. Content stays in files, not SavedVariables.
+    App/                  Startup, localized text, and runtime coordination
+    Game/                 Pack registry, rules, scoring, and quiz state
+    Network/              Identity, addon-message transport, sessions, discovery
+    Data/                 Saved settings, personal scores, historical archives
+    UI/                   Setup window, answer widget, reusable controls, fonts
+    Packs/WarcraftLore/    Bundled questions, registration, and provenance
+    Dev/                  Source-only preview, tests, companion-addon example
+    Docs/                 Player and pack-author guides
+    Libs/                 Unmodified embedded SharedMedia dependencies
+    .github/workflows/    Validation, alpha tagging, and publishing
 
-`Game.lua` shuffles the deck and choices, repeats full cycles, and retains each player's latest changed selection. Every answer window is `Quiz.ANSWER_SECONDS` (15). `Scoring.lua` awards 1 point plus 0.1 per whole second remaining; wrong answers lose 1.0 early, decaying exponentially to 0.5 late in tenth-point steps. Unanswered questions score zero. Each new game's standings start at zero and use only host-observed answers, never saved personal or league totals. Closing a multiplayer round also selects the fastest correct final answer.
+`Orbit-Quiz.toc` owns the framework's load order: libraries → namespace/text → rules/registry/content → scoring/storage/model → networking/UI → runtime. Source checkouts load the development preview last; packaged releases omit it. Third-party quiz addons load their files through their own TOCs.
 
-`Store.lua` validates/migrates `OrbitQuizDB` through schema 6 and owns settings, HUD position/appearance and untouched league archives. `PersonalScores.lua` owns the account-wide `personalScores` subtree: stable pack IDs accumulate local progress across hosts and characters, retaining pack/scoring-version metadata. Compressed host/session/round identity ranges prevent duplicate credit while accepting delayed older receipts; recent canonical receipts support consistency checks. Archives cannot reliably be split by pack and are never backfilled into personal totals.
+`App/Runtime.lua` composes gameplay, networking, persistence and presentation. `Game/` owns author rules and host-observed outcomes; `Network/` carries validated questions/results; `Data/` retains confirmed personal progress. `UI/` renders these owners' state. Media changes notify the application through a callback rather than reaching into UI consumers.
 
-`Identity.lua` captures the local character's native identity. `Comms.lua` carries bounded, fragmented, throttled addon `WHISPER` messages. `Session.lua` owns one host/participant role, question readiness, revisioned answers and recovery. Questions identify their actual pack, title, content/scoring versions, choice count, difficulty and era, never the answer key, explanation or source URL. Results carry host-calculated points/timing and optional fastest-correct identity/timing; participants validate these, saving only personal accounting before acknowledging. Bounded receipt retries survive question changes and short reconnects without rewinding the HUD. Membership nonces fence old answer/acknowledgement revisions.
+The public `OrbitQuiz:RegisterQuestionPack` API connects independently maintained quiz addons through their own `## Dependencies: Orbit-Quiz` TOCs. Authors use their own folders/repositories and releases; no core contribution or TOC edit is required. The [authoring guide](Docs/PACKS.md) includes complete starter files and the [copyable template](Dev/Examples/Orbit-Quiz-Pack-Example/README.md) is self-contained.
 
-`Discovery.lua` advertises games through the silently joined `OrbitQuizLobby` channel and available guild/home-group/instance routes, expiring listings without joining them. `UI.lua` owns explicit joins and host setup. Scores defaults to personal pack progress; This game shows the host's standings or a participant's own host-reported session total. Separate archive views retain all earlier leagues and 100-point boards. The old `league` setting remains a display-only game name, not a scoring bucket.
-
-`Main.lua` owns the shared ticker, host deadline/scoring, three-second result breaks, and interruption recovery. `Widget.lua` renders a small grey pack name, a question four font-size units larger than its answers, a two-physical-pixel countdown, and one column of clickable answer text without letter prefixes or button art. The bar sits two pixels below the wrapped prompt and shifts its gradient from gold to red. Colors carry hover, selection and correctness; pressing offsets only the answer label. Confirmed results animate the player's signed score beside the prompt and, in multiplayer rounds, the fastest correct player below the answers. Owned font objects provide black shadows at (-2, -2) physical pixels; totals and diagnostics stay in `/oq`.
-
-The widget grows around an independently saved anchor: horizontal screen thirds align the pack/question and the vertical half sets content growth; answers remain left-aligned. Long content scrolls within a screen-bounded viewport with shadow/press insets. A reserved right-hand score column and separate winner footer prevent reveal reflow or scrolling behind animations. Only the open `/oq` panel enables its purple edit outline and dragging, without adding a drag label or changing the Q/A layout.
-
-The `/oq` Settings tab exposes `Scale` (50–200% in 5% steps) and `Font` (SharedMedia). `SettingsControls.lua` reproduces Orbit's compact label/control/value rows with the native Edit Mode slider; `FontPicker.lua` owns the dark arrow control and `FontMenu.lua` its searchable, virtualized font-preview list. `UI:SaveWidgetSettings` saves then calls `Widget:ApplySettings` synchronously, reflowing all HUD text without changing the host draft, selection, deadline or setup-window scale. `Media.lua` resolves font names and refreshes consumers on registration; missing names retain their saved preference. Defaults remain 100% and Blizzard's native font.
-
-`DialogChrome.lua` reproduces Orbit's actual Edit Mode settings shell: the `housing-basic-container` atlas with native shader NineSlice and tapered dividers. `Controls.lua` owns native panel buttons, tooltip-bordered inputs, text-only gold tabs and Blizzard `WowStyle1DropdownTemplate` pack/score menus. `ScrollBar.lua` owns the list/HUD two-pixel scroll chrome and active-only animation. Window lists place it just inside the right border independently of the content padding; the bare HUD keeps its own spacing. These depend on Blizzard SharedXML, never Orbit.
-
-Setup placements retain their authored dimensions for display-change reflow. Root positions, divider joins, text insets, HUD outlines and rendered scroll offsets snap to the physical pixel grid; native control scripts and art remain intact. Scroll ranges come from explicitly sized content, with batched layout changes committed through `UpdateScrollChildRect`. Press/release shifts only the active label by one physical pixel; answer acknowledgements change colors without relaying out labels, resetting idle animations or reapplying unchanged native button state.
-
-Source checkouts also load `Development.lua`: `/oqdev games` supplies 32 deterministic sample listings through `UI:SetGamePreview`, reusing the actual game rows and scrollbar. `/oqdev off` restores discovery. Preview rows cannot join sessions; the discovery registry, active game, and SavedVariables are untouched.
+Warcraft Lore contains 1,183 game-based questions with four to six choices. Its source-only comic archive is excluded from play and releases. Each module's README records its data flow and maintenance constraints.
 
 ## Gotchas
 
-- WoW cannot scan arbitrary files or directories. A loose YAML/JSON/Markdown/text file is not auto-discoverable: packs are TOC-listed Lua files, normally in sibling companion-addon folders.
-- Lua packs are trusted executable addon code. Schema validation protects registry consistency; it does not sandbox the file that registers the pack.
-- Sessions support the host plus 16 remote widget players. Lobby visibility is limited by WoW's realm/channel rules; guild/group discovery does not guarantee cross-realm whispers will reach the host. There is no Battle.net relay. Channel failures degrade discovery to available group/guild routes; inaccessible/full games time out.
-- All participants need protocol 6 (`ORBITQUIZ6` / `ORBITQUIZDISC6`); older peers lack the current result payload. Existing four-choice packs and saved archives remain compatible; legacy Basics selections become Warcraft Lore.
-- Every selected question is used each shuffled cycle. The last question of one cycle is not immediately repeated when there is more than one question. A one-question pack necessarily repeats.
-- Only the final selection scores, using its latest changed-selection host-receipt time. Same-choice retries cannot retime it; leaving does not erase an accepted answer. Gold marks local selection, not host acceptance; only confirmed results paint green/red or animate feedback. Fastest means correct, with exact ties ordered by normalized player name then key; it requires a current, unexpired remote peer ready for that round at closure. No correct answers means no winner. Timer expiry alone is not a result; reconnect/refresh must not replay animations. This is trusted social play, not anti-cheat or latency-compensated competition.
-- The penalty curve keeps uniform blind guessing negative in expectation for four to six choices, including tenth-point rounding. Scores must be allowed below zero: a zero floor would make guessing profitable again. Historical rounds retain their original scoring version; never validate old zero-point wrong answers with the live penalty calculator.
-- Joining another game leaves the prior session or stops local hosting first. A live HUD has no close/Escape action; closing `/oq` only locks its position. Use Leave or Stop to exit. Lost departure packets may occupy an old host slot until its 35-second lease expires, without restoring the player's old session.
-- Manual Pause voids an unfinished question and stays paused. Host communication restrictions/disconnection auto-pause and resume fresh. Logout/reload end the session; discovery remains idle between games so players can browse again.
-- Visible chat play is removed: there is no question publisher, chat-answer listener, channel setup, or Publish command. Hidden discovery and addon-message transport remain automatic. Question readiness waits only for widget peers, never for manual publication.
-- Store normalization discards retired chat settings and channel passwords when loading or saving. It preserves current totals and archived public/whisper data; the internal `PUBLIC` score bucket remains a storage compatibility contract, not an answer mode.
-- Only confirmed closed results affect personal scores. WoW flushes SavedVariables on normal logout/reload; crashes can lose unsaved progress. Totals are shared by this account's local characters, not synchronized between computers/accounts. The host keeps session standings; participants never submit lifetime totals. Prior leagues remain historical. Invalid/capacity-limited personal data is never reset; an expected host storage failure pauses only after queuing other players' completed receipts.
-- Stable pack ID, not title or selected deck, owns personal progress: All packs credits each question's source pack and content-version updates retain totals. Duplicate tracking spans packs within a host/session. Network retry retention is bounded; leaving/switching authority or host logout cannot guarantee delivery of an unseen result. Locally retained progress is personal statistics, not verified rankings: editing saves/code, deleting penalties or dishonest hosts cannot be prevented by client-side encryption/checksums.
-- `SetAtlas` loads the housing container's NineSlice data automatically. Never replace that texture with a flat wash, clear its slice data, or overlay the unrelated portraitless dialog border. Setup buttons retain native font strings and state scripts. HUD choices do not register their label with `Button:SetFontString`: Quiz alone owns the press offset. Release, leave, hide, disable, drag and reflow reset it without moving the hit area.
-- Reused FontStrings must clear their old height before measuring; otherwise `GetStringHeight()` can measure truncated text. Questions/answers wrap without line limits and round height up to a pixel. HUD labels bind reusable addon-owned font objects, preserving color/alignment; native fonts are never mutated. A hidden FontString probes SharedMedia assets because its `SetFont` returns success while a Font object's does not. Failed assets fall back uncached, retrying on settings/media updates, never every HUD tick. Shadows and press depth need padding inside the clipped scroll child.
-- The Edit Mode slider captures native dialog callbacks during template `OnLoad`; detach its `cbrHandles` before registering quiz callbacks. Replacing method names afterward does not remove captured functions. Keep native track/stepper scripts and guard programmatic value synchronization from saving again. Font menus close with their owner and reuse bounded visible rows, so large media catalogues do not create one frame per font.
-- Font-menu search keeps focus after Enter/clear so Escape dismisses only the popup. Without focus, Blizzard's `CloseSpecialWindows` closes every registered special frame, including `/oq`; do not intercept that global handler.
-- HUD anchors and bounds use widget-local units: convert UIParent dimensions through the chosen frame scale, while drag persistence compares scaled rectangles. Reflow alone must not rewrite the saved normalized position. Pixel caches include physical resolution as well as effective scale; snapping offsets cannot fix a fractional root origin. Thin timer/shadow/outline dimensions stay physical pixels at every Q/A scale.
-- Scroll children and viewports share an inherited scale and declare their full content bounds. Do not derive scrollbar visibility from transient native descendant ranges. Layout batches cancel old motion; explicit resets use `ScrollTo(0, true)` even at zero, since a wheel animation may still be pending. Easing and drag accumulate unsnapped motion separately from pixel-snapped rendering.
-- Development previews are opt-in and reset on reload. The TOC's `@do-not-package@` block and `.pkgmeta` exclude the module from packager-built releases; raw source copies still contain it. Dummy listings never enter network discovery, and Refresh cannot advertise them.
-- No question editor, arbitrary data-file importer, cross-account score synchronization, trusted global leaderboard, or guaranteed cross-realm transport is included.
+- All participants need protocol 7. Sessions support the host plus 16 remote players; realm/channel restrictions can prevent discovery or whispers across realms. There is no Battle.net relay.
+- Only host-confirmed closed results award points. This is trusted social play, not anti-cheat or latency-compensated competition; personal statistics are not verified rankings.
+- Question packs are trusted executable Lua, loaded through companion-addon TOCs. WoW cannot discover arbitrary JSON/YAML/text files; keep custom packs outside the core addon so updates do not overwrite them.
+- Store schema 6, personal-score schema 2, stable pack IDs, rule identities, and historical scoring are independent contracts. A folder cleanup must not migrate or rescore saved data.
+- Native rendering/network delivery and SavedVariables disk timing need in-game verification. Offline tests do not certify those boundaries.
+- After updating, use `/reload` and verify `/oq`, hosting/joining and appearance. The TOC remains the loading authority; old root-level Lua copies are no longer used.
 
 ## Secrets
 
-Addon communication restrictions suspend payload parsing and sending. Native character identity, incoming addon payloads, sender names, and lobby identifiers are checked before Lua operations. UI timers use addon-owned deadlines; no protected unit-state arithmetic or native frame hooks are required.
+Native identity and incoming communication are guarded before Lua operations. Chat lockdown suspends parsing/sending. Quiz deadlines and UI timing are addon-owned data; no protected unit-state arithmetic is required.
 
 ## References
 
-- [MIT licence](LICENSE) — first-party Orbit-Quiz code; bundled third-party libraries retain their own licences (see [Libs/README.md](Libs/README.md)).
-- `PACKS.md` and `Examples/` — companion question-pack authoring and installation.
-- `Packs/SOURCES.md` — bundled lore coverage, continuity decisions, difficulty guidance, and review provenance.
-- `QUICKSTART.md` — first run, persistence, developer preview, and two-client verification.
-- `.tests/` — offline behavioral checks; these do not certify native networking or rendered UI. `/oq status` reports local session state.
-- Design references: Orbit `Core/Foundation/DialogChrome.lua`, `Core/Config/Panels/OrbitSettingsDialog.lua`, Config widgets, and `Plugins/ErrorMessages/`. The implementation is local; there are no Orbit imports, media paths, settings reads, or hooks into its frames.
-- Workspace skills: `wow-frames`, `pixel`, `orbit-skinning`, `strata-strategy`, `orbit-settings`, `wow-secrets`, `wow-12-1-0`, `orbit-debug`.
-- Blizzard reference: `../wow-ui-source/Interface/AddOns/Blizzard_APIDocumentationGenerated/ChatInfoDocumentation.lua` and `RestrictedActionsDocumentation.lua`.
-- Chrome reference: Blizzard `SimpleTextureBaseAPIDocumentation.lua` (`SetAtlas` / `ClearTextureSlice`) and `Blizzard_SharedXML/SecureUIPanelTemplates.xml`.
-- Dropdown reference: Blizzard `Blizzard_Menu/DropdownButton.lua` and `Blizzard_Menu/Mainline/MenuTemplates.xml`; native dropdowns own menu layout, selection, and rendering.
-- Settings references: Orbit `Config/Widgets/Slider.lua`, `PickerControl.lua`, `FontPicker.lua`, `MediaMenu.lua`; Blizzard `Blizzard_EditMode/Shared/EditModeTemplates.lua` and `Blizzard_SharedXML/EventUtil.lua`. The inner `MinimalSlider` `Init` takes the number of intervals, not the step size.
-- HUD font/animation references: Blizzard `SimpleFontAPIDocumentation.lua`, `SimpleFontStringAPIDocumentation.lua`, SharedXML `FontableFrameMixin.lua`, `SimpleAnimatableObjectAPIDocumentation.lua`, `SimpleAnimTranslationAPIDocumentation.lua`, and `Blizzard_ItemUpgradeUI/Mists/Blizzard_ItemUpgradeUI.xml`.
+- [Application](App/README.md), [gameplay](Game/README.md), [networking](Network/README.md), [persistence](Data/README.md), and [UI](UI/README.md).
+- [Bundled packs](Packs/README.md), [development and tests](Dev/README.md), and [release workflows](.github/workflows/README.md).
+- [MIT licence](LICENSE) covers first-party code; [bundled libraries](Libs/README.md) retain their upstream licences.

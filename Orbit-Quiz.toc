@@ -2,7 +2,8 @@
 ## Title: Orbit-Quiz
 ## Notes: Continuous multiplayer quiz widgets with persistent scores and installable question packs.
 ## Author: MoONSHO7
-## Version: 0.9
+## Version: @project-version@
+## X-Curse-Project-ID: 1676376
 ## SavedVariables: OrbitQuizDB
 ## OptionalDeps: LibSharedMedia-3.0, SharedMedia, SharedMedia_MyMedia
 ## Category: Orbit UI
@@ -10,44 +11,42 @@
 Libs\LibStub\LibStub.lua
 Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
 Libs\LibSharedMedia-3.0\LibSharedMedia-3.0.lua
-Init.lua
-Locale.lua
-WidgetLocale.lua
-Packs.lua
-Packs\LoreData.lua
-Packs\LoreRTS.lua
-Packs\LoreClassic.lua
-Packs\LoreBurningCrusade.lua
-Packs\LoreWrath.lua
-Packs\LoreCataclysm.lua
-Packs\LorePandaria.lua
-Packs\LoreDraenor.lua
-Packs\LoreLegion.lua
-Packs\LoreAzeroth.lua
-Packs\LoreShadowlands.lua
-Packs\LoreDragonflight.lua
-Packs\LoreWarWithin.lua
-Packs\LoreMidnight.lua
-Packs\WarcraftLore.lua
-Scoring.lua
-PersonalScores.lua
-Store.lua
-Media.lua
-Game.lua
-Identity.lua
-Comms.lua
-Session.lua
-Discovery.lua
-DialogChrome.lua
-ScrollBar.lua
-Controls.lua
-FontMenu.lua
-FontPicker.lua
-SettingsControls.lua
-Widget.lua
-UI.lua
-Main.lua
+App\Init.lua
+App\Locale.lua
+Game\Rules.lua
+Game\PackRegistry.lua
+Packs\WarcraftLore\Assemble.lua
+Packs\WarcraftLore\RTS.lua
+Packs\WarcraftLore\Classic.lua
+Packs\WarcraftLore\BurningCrusade.lua
+Packs\WarcraftLore\Wrath.lua
+Packs\WarcraftLore\Cataclysm.lua
+Packs\WarcraftLore\Pandaria.lua
+Packs\WarcraftLore\Draenor.lua
+Packs\WarcraftLore\Legion.lua
+Packs\WarcraftLore\Azeroth.lua
+Packs\WarcraftLore\Shadowlands.lua
+Packs\WarcraftLore\Dragonflight.lua
+Packs\WarcraftLore\WarWithin.lua
+Packs\WarcraftLore\Midnight.lua
+Packs\WarcraftLore\Register.lua
+Game\Scoring.lua
+Data\PersonalScores.lua
+Data\Store.lua
+UI\Media.lua
+Game\Game.lua
+Network\Identity.lua
+Network\Transport.lua
+Network\Session.lua
+Network\Discovery.lua
+UI\ScrollBar.lua
+UI\Controls.lua
+UI\FontPicker.lua
+UI\SettingsControls.lua
+UI\Widget.lua
+UI\Setup.lua
+App\Runtime.lua
 
 #@do-not-package@
-Development.lua
+Dev\Preview.lua
 #@end-do-not-package@

@@ -1,0 +1,76 @@
+name: Release AddOn
+
+on:
+  push:
+    tags:
+      - '[0-9]*.[0-9]*-alpha'
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    uses: ./.github/workflows/checks.yml
+    with:
+      ref: ${{ github.sha }}
+
+  release:
+    name: Package and publish alpha
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    concurrency:
+      group: orbit-quiz-release-package
+      cancel-in-progress: false
+      queue: max
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - name: Checkout tested release
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate alpha release tag
+        id: release-tag
+        shell: bash
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-alpha$ ]]; then
+            echo "::error::Release tags must use MAJOR.MINOR-alpha (for example, 1.0-alpha)"
+            exit 1
+          fi
+          tag_sha=$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")
+          if [[ "$tag_sha" != "$GITHUB_SHA" ]]; then
+            echo "::error::Release tag no longer points to the triggering commit"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main; then
+            echo "::error::Release commit must belong to main history"
+            exit 1
+          fi
+          latest_tag=$(git tag --list --sort=-v:refname |
+            awk '/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-alpha$/ && !found { print; found = 1 }')
+          if [[ "$RELEASE_TAG" != "$latest_tag" ]]; then
+            echo "Tag $RELEASE_TAG is superseded by $latest_tag; skipping publication"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Stamp packaged runtime version
+        if: steps.release-tag.outputs.publish == 'true'
+        shell: bash
+        run: |
+          sed -i -E "s/^Quiz\.version = \"[^\"]*\"$/Quiz.version = \"$RELEASE_TAG\"/" App/Init.lua
+          grep -Fx "Quiz.version = \"$RELEASE_TAG\"" App/Init.lua
+
+      - name: Build and publish addon
+        if: steps.release-tag.outputs.publish == 'true'
+        uses: BigWigsMods/packager@6d50adb6e8517eefef63f4afb16a6518166a6b28 # v2
+        env:
+          CF_API_KEY: ${{ secrets.CURSE_API_KEY }}
+          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}

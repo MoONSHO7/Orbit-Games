@@ -1,8 +1,0 @@
-## Interface: 120100
-## Title: Orbit-Quiz: Example Pack
-## Notes: Three sample questions for Orbit-Quiz. Copy this addon to author your own pack.
-## Author: Orbit-Quiz
-## Version: 1.0
-## Dependencies: Orbit-Quiz
-
-Questions.lua

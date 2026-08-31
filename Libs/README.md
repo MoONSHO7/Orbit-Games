@@ -10,7 +10,7 @@ Orbit-Quiz shares the normal global SharedMedia registry with installed media ad
 
 ## Implementation
 
-The addon TOC loads LibStub, CallbackHandler and LibSharedMedia in that order before first-party modules. `../Media.lua` owns font lookup and registration notifications; `../Widget.lua` owns rendering. `.pkgmeta` pins the upstream sources used for packaged releases.
+The addon TOC loads LibStub, CallbackHandler and LibSharedMedia in that order before first-party modules. `../UI/Media.lua` owns font lookup and registration notifications; `../UI/Widget.lua` owns rendering. `.pkgmeta` pins the upstream sources used for packaged releases.
 
 ## Gotchas
 

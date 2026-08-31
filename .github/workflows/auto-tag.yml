@@ -1,0 +1,61 @@
+name: Auto Tag
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    uses: ./.github/workflows/checks.yml
+    with:
+      ref: ${{ github.sha }}
+
+  tag:
+    name: Create alpha tag
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    concurrency:
+      group: orbit-quiz-release-tag
+      cancel-in-progress: false
+      queue: max
+    steps:
+      - name: Checkout tested commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          token: ${{ secrets.ORBIT_PAT }}
+
+      - name: Calculate version and create tag
+        shell: bash
+        run: |
+          latest_tag=$(git tag --list --sort=-v:refname |
+            awk '/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-alpha$/ && !found { print; found = 1 }')
+
+          if [[ -z "$latest_tag" ]]; then
+            version="1.0-alpha"
+          else
+            if git merge-base --is-ancestor "$GITHUB_SHA" "refs/tags/$latest_tag"; then
+              echo "Commit $GITHUB_SHA is already covered by $latest_tag; skipping"
+              exit 0
+            fi
+            if ! git merge-base --is-ancestor "refs/tags/$latest_tag" "$GITHUB_SHA"; then
+              echo "::error::Alpha tag $latest_tag is not an ancestor of the tested commit"
+              exit 1
+            fi
+            IFS=. read -r major minor <<< "${latest_tag%-alpha}"
+            version="$major.$((minor + 1))-alpha"
+          fi
+
+          echo "Creating alpha release $version for $GITHUB_SHA"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$version" "$GITHUB_SHA" -m "Release $version"
+          git push origin "refs/tags/$version:refs/tags/$version"

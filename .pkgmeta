@@ -16,7 +16,13 @@ externals:
 enable-nolib-creation: no
 
 ignore:
-    - .tests
-    - Packs/Archive
-    - Development.lua
+    - .git
+    - .github
+    - .gitignore
+    - .env
+    - .env.*
+    - .release
+    - .stylua.toml
+    - Dev
+    - Packs/WarcraftLore/Archive
     - .styluaignore
