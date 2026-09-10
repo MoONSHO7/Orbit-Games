@@ -10,7 +10,7 @@ Every push to `main` can publish the tested commit without a manual source-versi
 
 ## Implementation
 
-`checks.yml` validates an immutable SHA with Python 3.12, Lupa's Lua 5.1 runtime and StyLua 2.3.1.
+`checks.yml` validates an immutable SHA with Python 3.12 and StyLua 2.3.1. It installs `Dev/Tests/requirements.txt`, which pins Lupa's Lua 5.1 runtime and Pillow for the card-atlas checks.
 
 `auto-tag.yml` validates each `main` push, then creates the next strict `MAJOR.MINOR-alpha` tag with `ORBIT_PAT`. Reruns skip commits already covered by an alpha tag; divergent tag history fails.
 

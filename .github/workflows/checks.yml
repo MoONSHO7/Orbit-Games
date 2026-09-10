@@ -35,8 +35,8 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install Lua runtime
-        run: python -m pip install --disable-pip-version-check lupa==2.8
+      - name: Install regression dependencies
+        run: python -m pip install --disable-pip-version-check -r Dev/Tests/requirements.txt
 
       - name: Install StyLua
         env:

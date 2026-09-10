@@ -12,7 +12,7 @@ Keep test fixtures and author tooling out of runtime modules and published addon
 
 `Preview.lua` loads last inside the TOC's `@do-not-package@` block. `/ogdev games` supplies deterministic discovery listings through the shared setup shell; `/ogdev cards` drives the real Hold'em model and table with seven local computer seats; `/ogdev toasts` exercises the actual Quiz streak renderer and sound queue; `/ogdev off` cancels every preview. These commands are silent: the browser, table or toast HUD is their feedback, and an unavailable or unknown request leaves the current visual state unchanged.
 
-[Tests](Tests/README.md) execute the production TOC in mocked Lua 5.1 runtimes. Run `python -B -u Dev/Tests/run.py` and `stylua --check --output-format Summary .` from the addon root. [Examples](Examples/README.md) demonstrates `OrbitGames.Quiz:RegisterPack`.
+[Tests](Tests/README.md) execute the production TOC in mocked Lua 5.1 runtimes. Install `python -m pip install -r Dev/Tests/requirements.txt`, then run `python -B -u Dev/Tests/run.py` and `stylua --check --output-format Summary .` from the addon root. [Examples](Examples/README.md) demonstrates `OrbitGames.Quiz:RegisterPack`.
 
 [The September 2026 review](REVIEW.md) records reproduced correctness defects, cleanup and the remaining architecture recommendations.
 
