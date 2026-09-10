@@ -1,9 +1,9 @@
-local _, Quiz = ...
-local L = Quiz.L
+local _, Games = ...
+local L = Games.L
 local MAX_NAME_BYTES = 120
 
-Quiz.Identity = {}
-local Identity = Quiz.Identity
+Games.Identity = {}
+local Identity = Games.Identity
 
 function Identity:NormalizeName(value)
     if issecretvalue(value) or type(value) ~= "string" or value:find("[%z\1-\31\127|<>]") then

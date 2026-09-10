@@ -1,9 +1,10 @@
-local _, Quiz = ...
+local _, Games = ...
 
 local TEXT_INSET = 9
 local EDGE_PIXELS = 1
 local SCROLLBAR_OFFSET = 6
 local INPUT_INSET = 5
+local INPUT_FONT = "GameFontHighlight"
 local CONTAINER_ATLAS = "housing-basic-container"
 local DIVIDER_COLOR = { 0.3, 0.3, 0.3 }
 local DIVIDER_PIXELS = 1
@@ -30,9 +31,9 @@ local COLORS = {
     muted = { 0.6, 0.6, 0.6, 1 },
 }
 
-Quiz.Controls =
+Games.Controls =
     { pixelSkins = {}, scrolls = {}, tabs = {}, buttons = {}, edits = {}, dividers = {}, scrollingLabels = {} }
-local Controls = Quiz.Controls
+local Controls = Games.Controls
 
 local function Pixels(frame, count)
     return PixelUtil.GetNearestPixelSize(0, frame:GetEffectiveScale(), count)
@@ -63,7 +64,9 @@ local function LayoutEditText(edit)
 end
 
 local function LayoutScrollingLabel(frame, reset)
-    local width = frame:GetWidth()
+    local leftInset = Pixels(frame, frame.scrollLeftInsetPixels or 0)
+    local rightInset = Pixels(frame, frame.scrollRightInsetPixels or 0)
+    local width = math.max(0, frame:GetWidth() - leftInset - rightInset)
     local measuredWidth = frame.Text:GetUnboundedStringWidthForText(frame.Text:GetText() or "")
     local textWidth = PixelUtil.GetNearestPixelSize(measuredWidth, frame:GetEffectiveScale())
     if textWidth < measuredWidth then
@@ -74,6 +77,11 @@ local function LayoutScrollingLabel(frame, reset)
     local visible = frame:IsVisible()
     if (changed or distance == 0 or not visible) and frame.animation:IsPlaying() then
         frame.animation:Stop()
+    end
+    if frame.scrollLeftInset ~= leftInset or frame.scrollRightInset ~= rightInset then
+        frame.scrollLeftInset, frame.scrollRightInset = leftInset, rightInset
+        frame.Text:ClearAllPoints()
+        PixelUtil.SetPoint(frame.Text, "TOPLEFT", frame, "TOPLEFT", leftInset, 0)
     end
     frame.Text:SetSize(math.max(width, textWidth), frame:GetHeight())
     if changed then
@@ -190,10 +198,15 @@ function Controls:SetScrollingText(frame, text, reset)
     LayoutScrollingLabel(frame, true)
 end
 
+function Controls:SetScrollingInsets(frame, leftPixels, rightPixels)
+    frame.scrollLeftInsetPixels = leftPixels
+    frame.scrollRightInsetPixels = rightPixels
+    LayoutScrollingLabel(frame, true)
+end
+
 function Controls:Panel(parent, name)
     local frame = CreateFrame("Frame", name, parent)
     local background = frame:CreateTexture(nil, "BACKGROUND", nil, -1)
-    -- SetAtlas loads the housing container's native shader NineSlice data; a flat wash would replace its art.
     background:SetAtlas(CONTAINER_ATLAS)
     background:SetAllPoints(frame)
     frame.Chrome = { Background = background }
@@ -325,7 +338,7 @@ function Controls:Edit(parent, width, height, maxLetters)
     local edit = CreateFrame("EditBox", nil, parent, "BackdropTemplate")
     PixelUtil.SetSize(edit, width, height)
     self:StyleInput(edit, 0.5)
-    edit:SetFontObject("ChatFontNormal")
+    edit:SetFontObject(INPUT_FONT)
     LayoutEditText(edit)
     self.edits[edit] = true
     edit:SetAutoFocus(false)
@@ -347,7 +360,7 @@ function Controls:Scroll(parent, width, height, scrollbarOptions)
     local content = CreateFrame("Frame", nil, scroll)
     PixelUtil.SetSize(content, width, height)
     scroll:SetScrollChild(content)
-    scroll.ScrollBar = Quiz.ScrollBar:Attach(scroll, scrollbarOptions or { rightOffset = SCROLLBAR_OFFSET })
+    scroll.ScrollBar = Games.ScrollBar:Attach(scroll, scrollbarOptions or { rightOffset = SCROLLBAR_OFFSET })
     self.scrolls[scroll] = true
     return scroll, content
 end

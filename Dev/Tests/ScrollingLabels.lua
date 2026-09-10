@@ -11,9 +11,10 @@ local LOCALIZED_TEXT =
 local PHYSICAL_HEIGHTS = { 768, 1080, 1440 }
 local SCALES = { 0.65, 1, 1.35 }
 
-return function(Quiz)
+return function(Games)
+    local Quiz = Games.Quiz
     local assertions = 0
-    local Controls, UI = Quiz.Controls, Quiz.UI
+    local Controls, UI = Games.Controls, Games.UI
     local function Check(value, message)
         assertions = assertions + 1
         assert(value, message)
@@ -60,7 +61,6 @@ return function(Quiz)
             before[frame] = { visible = frame:IsVisible(), shown = frame:IsShown() }
         end
         action()
-        -- The shared mocks omit native descendant OnShow/OnHide propagation; simulate it only for these labels.
         for frame, state in pairs(before) do
             if frame:IsShown() == state.shown and frame:IsVisible() ~= state.visible then
                 local script = frame:GetScript(frame:IsVisible() and "OnShow" or "OnHide")
@@ -247,14 +247,20 @@ return function(Quiz)
     PixelUtil.SetSize(viewport, WIDTH, HEIGHT)
     viewport:Hide()
 
-    local function Game(index, pack)
+    local function Game(index, title)
         return {
             hostName = "Marqueehost" .. index .. "-TestRealm",
-            session = "marquee." .. index,
-            packName = pack,
-            league = "Scrolling label fixtures",
-            state = "open",
-            players = index,
+            sessionId = "marquee." .. index,
+            gameTypeId = Quiz.id,
+            protocolVersion = 2,
+            activityId = Quiz.id,
+            activityVersion = 1,
+            title = title,
+            description = "Quiz",
+            phase = "open",
+            playerCount = index,
+            maxPlayers = 17,
+            joinable = true,
             preview = true,
         }
     end
@@ -271,11 +277,11 @@ return function(Quiz)
     end
     local function Row(row, game)
         local frame = row.detailViewport
-        local text = Quiz.L.W_GAME_DETAIL_F:format(game.packName, game.players)
+        local text = Games.L.W_GAME_DETAIL_F:format(game.title, game.description, game.playerCount, game.maxPlayers)
         Same(row.detail, frame.Text, "public row.detail remains the original FontString interface")
         Same(frame:GetParent(), row, "marquee belongs to its pooled row")
         Same(row.game, game, "pooled row refers to the current listing")
-        Same(row.gameKey, game.hostName .. ":" .. game.session, "row retains an immutable identity key")
+        Same(row.gameKey, game.hostName .. ":" .. game.sessionId, "row retains an immutable identity key")
         Same(UI.gameRowPool.active[row], true, "visible row remains an active pool member")
         Check(UI.placements[frame] ~= nil, "fixed viewport participates in setup layout")
         Same(UI.placements[row.detail], nil, "setup layout cannot clamp the full-width moving text")
@@ -310,15 +316,17 @@ return function(Quiz)
     Test.AdvanceAnimations(PAUSE + MIN_DURATION / 2)
     steady = Phase(firstViewport)
     local shows, hides = first.showTransitions, first.hideTransitions
-    preview.games[2].state = "paused"
+    preview.games[2].phase = "paused"
     Refresh()
     Same(UI.gameRows[1], first, "unrelated listing changes retain the existing row at its index")
     Same(UI.gameRows[2], second, "changed listing reuses its own row")
     Same(UI.gameRows[3], third, "other unchanged rows are retained")
     SamePhase(firstViewport, steady, "unrelated listing change")
-    preview.games[1].league = "Updated league with unchanged description"
+    preview.games[1].description = "Updated mode with unchanged title"
     Refresh()
-    SamePhase(firstViewport, steady, "own listing metadata change")
+    Restarted(firstViewport, steady.plays, "own listing description change")
+    Row(first, preview.games[1])
+    steady = Phase(firstViewport)
     Same(first.showTransitions, shows, "refresh never hides and reshow retained rows")
     Same(first.hideTransitions, hides, "refresh never recycles retained rows")
     SameAllocations(allocated, "listing metadata changes")
@@ -330,9 +338,9 @@ return function(Quiz)
     SameAllocations(allocated, "idle browser refreshes")
 
     for _, replacement in ipairs({
-        { "packName", LONG_TEXT .. " — new collection" },
-        { "players", 12 },
-        { "session", "marquee.restarted" },
+        { "title", LONG_TEXT .. " — new collection" },
+        { "playerCount", 12 },
+        { "sessionId", "marquee.restarted" },
         { "hostName", "Replacementhost-TestRealm" },
     }) do
         Test.AdvanceAnimations(PAUSE + MIN_DURATION / 2)

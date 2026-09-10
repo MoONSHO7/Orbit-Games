@@ -1,0 +1,100 @@
+## Interface: 120100
+## Title: Orbit-Games
+## Notes: Multiplayer party games for groups and guilds, including Quiz and Cards.
+## Author: MoONSHO7
+## Version: @project-version@
+## X-Curse-Project-ID: 1676376
+## SavedVariables: OrbitGamesDB
+## OptionalDeps: LibSharedMedia-3.0, SharedMedia, SharedMedia_MyMedia, LibDataBroker-1.1, LibDBIcon-1.0
+## IconTexture: Interface\AddOns\Orbit-Games\Assets\Orbit.png
+## Category: Orbit UI
+
+Libs\LibStub\LibStub.lua
+Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
+Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
+Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
+Libs\LibSharedMedia-3.0\LibSharedMedia-3.0.lua
+App\Init.lua
+App\Locale.lua
+Core\GameTypes.lua
+Modes\Cards\Init.lua
+Modes\Cards\Gold.lua
+Modes\Cards\Locale.lua
+Modes\Cards\VariantRegistry.lua
+Modes\Cards\CardCatalog.lua
+Modes\Cards\Deck.lua
+Modes\Cards\Variants\TexasHoldem\Init.lua
+Modes\Cards\Variants\TexasHoldem\Rules.lua
+Modes\Cards\Poker\HandEvaluator.lua
+Modes\Cards\Variants\TexasHoldem\Betting.lua
+Modes\Cards\Variants\TexasHoldem\Pots.lua
+Modes\Cards\Variants\TexasHoldem\Projector.lua
+Modes\Cards\Variants\TexasHoldem\Model.lua
+Modes\Cards\Variants\TexasHoldem\Codec.lua
+Modes\Cards\Variants\TexasHoldem\Register.lua
+Modes\Quiz\Init.lua
+Modes\Quiz\Locale.lua
+Modes\Quiz\Rules.lua
+Modes\Quiz\PackRegistry.lua
+Modes\Quiz\Packs\WarcraftLore\Assemble.lua
+Modes\Quiz\Packs\WarcraftLore\RTS.lua
+Modes\Quiz\Packs\WarcraftLore\Classic.lua
+Modes\Quiz\Packs\WarcraftLore\BurningCrusade.lua
+Modes\Quiz\Packs\WarcraftLore\Wrath.lua
+Modes\Quiz\Packs\WarcraftLore\Cataclysm.lua
+Modes\Quiz\Packs\WarcraftLore\Pandaria.lua
+Modes\Quiz\Packs\WarcraftLore\Draenor.lua
+Modes\Quiz\Packs\WarcraftLore\Legion.lua
+Modes\Quiz\Packs\WarcraftLore\Azeroth.lua
+Modes\Quiz\Packs\WarcraftLore\Shadowlands.lua
+Modes\Quiz\Packs\WarcraftLore\Dragonflight.lua
+Modes\Quiz\Packs\WarcraftLore\WarWithin.lua
+Modes\Quiz\Packs\WarcraftLore\Midnight.lua
+Modes\Quiz\Packs\WarcraftLore\Register.lua
+Modes\Quiz\Scoring.lua
+Modes\Quiz\Data\PersonalScores.lua
+Modes\Quiz\Data\Store.lua
+Modes\Cards\Data\Store.lua
+Modes\Cards\Data\Ledger.lua
+Data\Store.lua
+UI\Media.lua
+Modes\Quiz\UI\SoundMedia.lua
+Modes\Quiz\Model.lua
+Network\Identity.lua
+Network\Transport.lua
+Modes\Cards\Network\Protocol.lua
+Modes\Cards\Network\Session.lua
+Modes\Quiz\Network\Streaks.lua
+Modes\Quiz\Network\Standings.lua
+Modes\Quiz\Network\Session.lua
+Network\Discovery.lua
+UI\ScrollBar.lua
+UI\Controls.lua
+UI\FontPicker.lua
+UI\SettingsControls.lua
+Modes\Cards\UI\CardArt.lua
+Modes\Cards\UI\Table.lua
+Modes\Cards\UI\ResultsPage.lua
+Modes\Cards\UI\HostPage.lua
+Modes\Cards\UI\SettingsPage.lua
+Modes\Quiz\UI\StreakToasts.lua
+Modes\Quiz\UI\ScoreTooltip.lua
+Modes\Quiz\UI\Widget.lua
+Modes\Quiz\UI\Scores.lua
+Modes\Quiz\UI\HostPage.lua
+Modes\Quiz\UI\SettingsPage.lua
+UI\Setup.lua
+UI\Minimap.lua
+Modes\Cards\Controller.lua
+Modes\Cards\Advert.lua
+Modes\Cards\Commands.lua
+Modes\Quiz\Controller.lua
+Modes\Quiz\Advert.lua
+Modes\Quiz\Commands.lua
+Modes\Cards\Register.lua
+Modes\Quiz\Register.lua
+App\Runtime.lua
+
+#@do-not-package@
+Dev\Preview.lua
+#@end-do-not-package@

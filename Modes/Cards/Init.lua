@@ -1,0 +1,24 @@
+local _, Games = ...
+
+Games.Cards = Games.Cards or {}
+local Cards = Games.Cards
+
+Cards.id = "cards"
+Cards.VARIANT_ID = "texas_holdem"
+Cards.CURRENCY_MODE = "gold"
+Cards.PROTOCOL_VERSION = 3
+Cards.ACTIVITY_VERSION = 2
+Cards.MAX_PLAYERS = 8
+Cards.MIN_PLAYERS = 2
+Cards.BUY_IN_MIN = 1000
+Cards.BUY_IN_MAX = 10000000
+Cards.TABLE_SCALE_MIN = 70
+Cards.TABLE_SCALE_MAX = 150
+Cards.TABLE_SCALE_STEP = 5
+Cards.TABLE_SCALE_DEFAULT = 100
+Cards.ACTION_SECONDS_MIN = 15
+Cards.ACTION_SECONDS_MAX = 120
+Cards.ACTION_SECONDS_STEP = 5
+Cards.ACTION_SECONDS_DEFAULT = 30
+Cards.MAX_CHIPS = 1000000000000
+Cards.MAX_TOTAL_CHIPS = Cards.MAX_CHIPS * Cards.MAX_PLAYERS

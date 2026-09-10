@@ -2,42 +2,42 @@
 
 ## Description
 
-Native character identity, bounded addon-message transport, quiz membership, and discovery.
+Native identity, bounded generic addon-message transport, game discovery and mode-routed sessions.
 
 ## Purpose
 
-Deliver authoritative quiz state over WoW's available communication routes without visible chat play or a dependency on Orbit.
+Move game-independent routing below registered game types while keeping each mode's payload validation with that mode.
 
 ## Implementation
 
-`Identity.lua` owns native identity capture and `NormalizeName`, including realm completion and secret guards. `Transport.lua` exposes `Quiz.Comms`: bounded encoding, fragmentation, queues, result tags and retries for addon whispers.
+`Identity.lua` owns native identity capture and `NormalizeName`, including realm completion and secret guards.
 
-`Session.lua` owns host/participant membership, readiness, answer revisions, immutable round views and recovery. Protocol 8 sends pack metadata and rules without answer keys or source evidence. Participants validate scoring and result-linked milestone references before persisting and acknowledging a receipt.
+`Transport.lua` exposes the shared bounded codec, fragmentation, queue, retry and tagged-message service under `ORBITGAMES1`. Its envelope carries the registered mode ID and protocol version; transport rejects unknown or mismatched pairs before routing otherwise opaque payload fields to their owner.
 
-`Streaks.lua` owns `Quiz.StreakSync`: canonical compact milestone references, bounded speaker dictionaries, and idle-time name prefetch. Membership-fenced `N`/`B` messages carry/acknowledge up to four names; `U` repairs missing current-result identities. A verified result exposes known names immediately and adds resolved names without changing points. UI consumes the authoritative `streakMilestones` array and `suppressStreakToasts` replay fence.
+`Discovery.lua` advertises immutable game/activity IDs and versions, mode summary, host state, occupancy, capacity and join availability under `ORBITGAMESDISC2`. A host snapshots its persisted Host-to selection: Server uses the silent `OrbitGamesLobby` custom channel, Guild uses the guild route, and Party uses whichever party, raid and instance routes are available. Advertisements and withdrawals use only those selected routes; discovery queries still fan out across every available route. Joining routes the complete advert to the selected mode owner, so Host-to controls listing discoverability rather than direct-join authorization.
 
-`Discovery.lua` advertises through a silent realm lobby and available guild/group routes. Setup selections join the same session owner used by commands. Application callbacks connect transport delivery/errors to sessions and host outcomes; received lifetime totals never enter host standings.
+`Modes/Quiz/Network/Session.lua` owns Quiz protocol 2 membership, readiness, answers, results, receipts and on-demand current-game standings. Ordinary question, result and heartbeat traffic carries no leaderboard. A participant requests it only by hovering the permanent HUD score; the host replies with a bounded authoritative snapshot and monotonic revision. Clients replace the last accepted snapshot rather than accumulating it, and the snapshot never enters score calculation or Personal receipt accounting. `Modes/Quiz/Network/Streaks.lua` owns compact Quiz milestone-name synchronization. The generic envelope does not validate Quiz rules or calculate points.
+
+`Modes/Cards/Network/Session.lua` owns Cards protocol 3 membership, idempotent action acknowledgement/retry, heartbeats and monotonically versioned recipient snapshots. Actions bind to the observed model revision so late delivery cannot apply a wager to a later turn. Queued snapshots finish before replacements; repeated joins/welcomes preserve acknowledgement and view state. `Protocol.lua` validates the action envelope; the Texas Hold'em codec validates and bounds the projected table without transporting the deck or burns.
 
 ## Gotchas
 
-- All players need protocol 8 (`ORBITQUIZ8` / `ORBITQUIZDISC8`). The host plus 16 remote players is the supported maximum.
-- Lobby visibility follows realm/channel rules. Guild/group visibility does not guarantee cross-realm whispers; channel failure falls back to available routes. There is no Battle.net relay.
-- Only one session may be active. Joining another host leaves the prior game or stops local hosting; lost departure packets can occupy the old host slot for its 35-second lease.
-- Membership nonces, bounded retries and round identities fence stale answers and acknowledgements. Locked-answer recovery must not retime or replace the accepted selection.
-- The canonical rules key cannot change within a session. Reject mismatched repeated question/result metadata rather than mutating an existing round.
-- Fastest means correct final accepted selection. Exact ties use normalized name, then player key; a current unexpired remote peer must be ready at closure. No correct answer means no winner.
-- Timer expiry alone is not a result. Local gold selection is not host acceptance; confirmed-result recovery must not replay feedback or award again. Rejoining an unscored open round still permits its first actual celebration.
-- Score receipts carry at most 17 compact speaker/streak pairs, never a repeated full roster. Name traffic yields to gameplay; missing names cannot block scoring. Speaker IDs are immutable within bounded 64-ID generations, never reused after rollover; retired generations cannot resurrect old names.
-- Milestone references are immutable for a result ID. Late name maps may extend only the current confirmed result; UI deduplicates by host/session/round/name. Historical dictionary gaps after extreme membership churn may remain unresolved, without changing saved scores.
-- Bounded retries cannot guarantee unseen results after leaving, host switching or logout. Checksums/rule keys identify data, not authenticated competitive scores.
-- Visible chat publication and chat-answer listeners are retired. Discovery/probe packets and addon-message restrictions are separate concerns and remain supported.
+- All players need discovery protocol 2, the registered Quiz game protocol 2 and the selected game type. Quiz supports the host plus 16 remote players; other activities advertise their own capacity.
+- Game/activity IDs and versions are wire contracts. Never change a payload shape beneath an existing pair; bump the applicable protocol instead.
+- The former `ORBITQUIZ8` / `ORBITQUIZDISC8` prefixes are legacy Quiz contracts and are never reinterpreted as generic messages.
+- Server is best-effort discovery among clients joined to `OrbitGamesLobby`, not a guaranteed realm-wide broadcast. Guild and group visibility still follow native membership and cross-realm addon-whisper rules.
+- WoW exposes no native Friends/Battle.net addon-message multicast, so there is no Friends audience or Battle.net relay.
+- Native addon messages and the shared lobby are invisible transport. Do not add a player-chat or chat-frame fallback when a route fails.
+- `ChannelThrottle` may follow submission of a native packet. Application acknowledgements and bounded retries determine delivery; blindly resending the same fragment can duplicate it.
+- Only one session may be active. Joining another host leaves the prior game or stops local hosting.
+- Standings are host-reported and downloaded only after score hover. Repeated requests and duplicate replies are idempotent; stale or conflicting revisions are rejected, and leaving or switching hosts discards the cached snapshot.
+- Bounded retries cannot guarantee unseen results after leaving, host switching or logout. Checksums and rule keys are consistency checks, not authenticated competitive scores.
 
 ## Secrets
 
-Check native names, GUIDs, payloads, sender names, lobby IDs and restriction flags before string operations or comparisons. Chat lockdown suspends both sending and parsing independently of unit secrecy.
+Check native names, GUIDs, payloads, sender names, lobby IDs and restriction flags before string operations or comparisons. Chat lockdown suspends sending and parsing.
 
 ## References
 
-- [Application lifecycle](../App/README.md), [saved receipts](../Data/README.md), and [two-client verification](../Docs/QUICKSTART.md).
-- [Transport/session/discovery simulations](../Dev/Tests/README.md).
-- Blizzard reference: `../../wow-ui-source/Interface/AddOns/Blizzard_APIDocumentationGenerated/ChatInfoDocumentation.lua` and `RestrictedActionsDocumentation.lua`; workspace skill `wow-secrets`.
+- [Application lifecycle](../App/README.md), [Cards protocol](../Modes/Cards/README.md), [Quiz protocol](../Modes/Quiz/README.md), [saved data](../Data/README.md) and [two-client verification](../Docs/QUICKSTART.md).
+- Blizzard reference: `../../wow-ui-source/Interface/AddOns/Blizzard_APIDocumentationGenerated/ChatInfoDocumentation.lua` and `RestrictedActionsDocumentation.lua`.

@@ -1,31 +1,31 @@
 # Create your own quiz addon
 
-Quiz packs are **independent WoW addons with a required dependency on Orbit-Quiz**. Keep your quiz in its own folder or repository and distribute it separately. You do not need to fork this repository, submit a pull request, or edit any Orbit-Quiz files.
+Quiz packs are **independent WoW addons with a required dependency on Orbit-Games**. Quiz is the framework's first registered game type; a pack extends only that type. Keep your pack in its own folder or repository and distribute it separately. You do not need to fork or edit Orbit-Games.
 
-Use **Lua data tables inside a small companion addon**. WoW loads Lua files named in an addon's TOC; it does not let an addon scan a directory or read arbitrary YAML, JSON, Markdown, or text files. Orbit-Quiz has no question editor or text-to-code importer.
+Use **Lua data tables inside a small companion addon**. WoW loads Lua files named in an addon's TOC; it does not let an addon scan a directory or read arbitrary YAML, JSON, Markdown, or text files. Orbit-Games has no question editor or text-to-code importer.
 
 Only the quiz host needs the pack. A pack can cover Warcraft, general trivia, or your guild's own topics.
 
-The quiz author owns its rules. The host selects the quiz and starts it; there are no host timing, scoring or rule overrides. Orbit-Quiz validates and copies the pack's rules, then sends them to participants with the questions.
+The Quiz author owns its rules. The host selects the Quiz and starts it; there are no host timing, scoring or rule overrides. `OrbitGames.Quiz` validates and copies the pack's rules, then sends them through the framework transport.
 
 ## Create the addon in your own project
 
-1. Create a separate project folder with your addon's name, for example `MyGuild-Trivia`. An `Orbit-Quiz-` name prefix is not required.
+1. Create a separate project folder with your addon's name, for example `MyGuild-Trivia`. An `Orbit-Games-` name prefix is not required.
 2. Create `MyGuild-Trivia.toc` and `Questions.lua` using the complete examples below. The folder and TOC basename must match.
-3. Set your addon metadata, a unique pack `id`, your questions, and the quiz's `rules`. Save Lua files as UTF-8 without a BOM. You maintain these files in your own project, not inside Orbit-Quiz.
-4. With WoW closed, install the released Orbit-Quiz addon and copy your finished `MyGuild-Trivia` folder beside it in `World of Warcraft/_retail_/Interface/AddOns/`.
-5. Launch WoW, enable both addons, open `/oq host`, and select your quiz. `/oq packs` lists registered packs and validation errors.
+3. Set your addon metadata, a unique pack `id`, questions and Quiz `rules`. Save Lua files as UTF-8 without a BOM. Maintain them in your project, not inside Orbit-Games.
+4. With WoW closed, install Orbit-Games and copy your finished `MyGuild-Trivia` folder beside it under `World of Warcraft/_retail_/Interface/AddOns/`.
+5. Launch WoW, enable both addons, then open `/og` and select Host or use `/og packs` to go there directly. Select your Quiz from its pack control. A rejected pack is absent from the list and its first validation error appears in the Host notice lane.
 
-Prefer a starter to copy? The repository's [example addon](../Dev/Examples/Orbit-Quiz-Pack-Example/README.md) includes three questions and a complete rules table. Copy only that folder into your own project, then rename its folder and TOC. The example is source-only; the two file examples below also work with an installed release, without downloading or contributing to the core repository.
+Prefer a starter to copy? The repository's [example addon](../Dev/Examples/Orbit-Games-Quiz-Pack-Example/README.md) includes three questions and a complete rules table. Copy only that folder into your own project, then rename its folder and TOC. The example is source-only; the two file examples below also work with an installed release.
 
-Once installed, editing an already listed Lua file takes effect after `/reload` and a new game. Restart WoW when adding a new addon folder or when a new TOC entry is not detected. Keeping the pack separate lets Orbit-Quiz and your quiz update independently.
+Once installed, editing a listed Lua file takes effect after `/reload` and a new game. Restart WoW when adding a folder or TOC entry. Keeping the pack separate lets Orbit-Games and your Quiz content update independently.
 
 The resulting folder layout is:
 
 ```text
 Interface/AddOns/
-  Orbit-Quiz/
-    Orbit-Quiz.toc
+  Orbit-Games/
+    Orbit-Games.toc
     ...
   MyGuild-Trivia/
     MyGuild-Trivia.toc
@@ -40,12 +40,12 @@ The companion TOC:
 ## Notes: Our guild's question pack.
 ## Author: Your name
 ## Version: 1.0
-## Dependencies: Orbit-Quiz
+## Dependencies: Orbit-Games
 
 Questions.lua
 ```
 
-`## Dependencies: Orbit-Quiz` is the connection to the framework: WoW loads Orbit-Quiz before your question file. Keep it a required dependency, not an optional one. Do not bundle Orbit-Quiz, copy its libraries, or add your files to its TOC.
+`## Dependencies: Orbit-Games` loads the framework before your question file. Keep it required, not optional. Do not depend on the packaged `Orbit-Quiz` migration shim for new work; that addon exists only for legacy saves and companion dependencies.
 
 Do not set `LoadOnDemand`: packs register during normal addon loading. To split a large pack into multiple files, list each file in **your addon's** TOC. Either register a separate pack ID from each file, or collect questions in your addon's namespace and register one combined pack from a final file.
 
@@ -54,7 +54,7 @@ Do not set `LoadOnDemand`: packs register during normal addon loading. To split 
 `Questions.lua` is a normal Lua file calling the public API:
 
 ```lua
-OrbitQuiz:RegisterQuestionPack({
+OrbitGames.Quiz:RegisterPack({
     id = "myguild_trivia",
     title = "My Guild Trivia",
     version = 1,
@@ -80,17 +80,17 @@ OrbitQuiz:RegisterQuestionPack({
 })
 ```
 
-Call the public `OrbitQuiz:RegisterQuestionPack` API directly. The `...` namespace passed to your Lua file belongs to **your addon**, not Orbit-Quiz; do not copy the core addon's private namespace imports. No extra registration event, slash command, or change to the core addon is needed.
+Call `OrbitGames.Quiz:RegisterPack` directly. The `...` namespace passed to your Lua file belongs to **your addon**, not Orbit-Games; do not copy private framework imports. No registration event or framework TOC edit is needed.
 
 `correctIndex` is the position of the correct answer **in the file**, starting at 1. The game can shuffle the choices and adjusts the answer mapping itself. Explanations must name the answer, not say "B is correct". Put `\"` inside a double-quoted Lua string when the text itself needs a quotation mark; do not insert literal line breaks.
 
 ## Share and update your quiz
 
-Maintain the pack in your own repository if you use version control. To share it, zip only the `MyGuild-Trivia` folder, with its TOC and Lua files directly inside that folder, and publish that archive as your own addon. Do not include an extra repository wrapper folder or a copy of Orbit-Quiz. Your release instructions should tell hosts to install Orbit-Quiz separately and enable both addons.
+Maintain the pack in its own repository if desired. Zip only the companion folder, with its TOC and Lua files directly inside. Do not bundle Orbit-Games or its compatibility shim; tell hosts to install Orbit-Games separately.
 
-Only the host needs your pack installed; other players need Orbit-Quiz and receive the questions and rules from the host. Your addon supplies content and rules, while the framework owns the widget, sessions and saved scores. No pack-specific SavedVariables or UI are needed.
+Only the host needs your pack; other players need Orbit-Games and receive validated Quiz data from the host. Your addon supplies content and rules while the framework owns the session, HUD and saved Quiz scores.
 
-Keep the pack `id` stable across updates, bump its content `version` when questions change, and bump `rules.version` when rules change. The TOC `Version` identifies your addon release separately. Before publishing, test with the installed release of Orbit-Quiz and check `/oq packs`; your quiz never needs approval or registration in this repository.
+Keep the pack `id` stable, bump content `version` when questions change, and bump `rules.version` when rules change. Before publishing, test against a released Orbit-Games build, open `/og packs`, and check the Host pack control and notice lane.
 
 ## Schema and limits
 
@@ -123,7 +123,7 @@ Packs retain the language of their files. Installing a French pack does not tran
 
 Existing four-choice packs need no changes. A pack can mix four-, five-, and six-choice questions. The widget shows one clickable text line per answer (wrapping when needed); every question uses its quiz's rules regardless of difficulty metadata. Explanations remain in pack/result data but are not displayed on this text-only widget. `difficulty`, `era`, and `source` are mandatory editorial fields for bundled Warcraft Lore, but optional in the public API.
 
-The bundled pack is split by era/work for maintenance, then registered as one `warcraft-lore` pack. See [Warcraft Lore's source guide](../Packs/WarcraftLore/SOURCES.md) for its scope, continuity rules, and source-review process. Keep additions of your own in a companion addon so an update cannot overwrite them.
+The bundled pack is split by era/work for maintenance, then registered as one `warcraft-lore` pack. See [Warcraft Lore's source guide](../Modes/Quiz/Packs/WarcraftLore/SOURCES.md) for its scope, continuity rules and review process.
 
 ## Quiz rules
 
@@ -147,32 +147,33 @@ Rules are pack-wide, not per-question. They are snapshotted at game start, so ch
 | `streakBonusPerCorrect` | `0` | 0-10 points in tenths added per consecutive correct answer **after the first**. |
 | `streakBonusMax` | `0` | 0-100 points in tenths; maximum extra streak points on one answer. Set both streak fields to `0` to disable. |
 
-Correct points are `correctPoints + floor(secondsRemaining) * speedBonusPerSecond + streakBonus`. The wrong penalty follows a normalized exponential between its two endpoints, rounded to tenths. Equal endpoints give a flat penalty; set both to `0` for no wrong-answer penalty. Unanswered questions always score zero, totals may be negative, and score precision stays at one decimal place.
+Correct points are `correctPoints + floor(secondsRemaining) * speedBonusPerSecond + streakBonus`. The wrong penalty follows a normalized exponential between its two endpoints, rounded to tenths. Equal endpoints give a flat penalty; set both to `0` for no wrong-answer penalty. Individual result deltas remain signed and unanswered questions always score zero. A hosted-session score clamps after every finalized delta, so a wrong answer at zero creates no hidden current-game debt. Personal per-pack receipt accounting remains signed and order-independent underneath its zero-floored display.
 
 Warcraft Lore explicitly uses the defaults above except `streakBonusPerCorrect = 0.1` and `streakBonusMax = 0.5`. Its streak bonuses are `0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.5, ...` on successive correct answers. A wrong or unanswered **closed** round resets the streak. A voided question neither awards points nor breaks the streak. A new game starts at zero streak; leaving cannot erase an already accepted answer. Only the final selection at closure counts, never intermediate guesses or retries.
 
 Automatic advancement, one correct choice from four to six, host-observed timing, communication safety pauses, the supported player limit and fastest-correct recognition remain engine behaviour. No untimed, manual-next, per-question rules, teams, hints or new answer types are included yet. A void consumes its deck position; ending a one-pass deck through voids finishes without scoring those questions. Validate the balance of custom rewards and penalties: arbitrary settings are not guaranteed to discourage blind guessing.
 
-Scores are separated by stable pack ID and a canonical key containing **every resolved rule**, including `rules.version`. Increase the rule revision when publishing changed rules; even if an author forgets, different resolved values create separate score rows. Changing only content with unchanged rules retains the same score row. Earlier scores remain under Original rules without rescoring. These keys provide identity and consistency, not encryption, authentication or anti-cheat protection.
+Scores are separated by stable pack ID and a canonical key containing **every resolved rule**, including `rules.version`. Increase the rule revision when publishing changed rules; even if an author forgets, different resolved values create separate history cards. Changing only content with unchanged rules retains the same card. Personal results from before pack-owned rules remain under Earlier scoring without a guessed ruleset or rescoring. These keys provide identity and consistency, not encryption, authentication or anti-cheat protection.
 
 ## Validation and troubleshooting
 
-Registration is atomic: a malformed question rejects the entire pack, and a duplicate pack never replaces the first one. A rejected pack is not offered to the host. The registry returns `false, errorMessage` on failure and retains contextual errors for the host; valid registration returns `true`.
+Registration is atomic: a malformed question rejects the entire pack, and a duplicate pack never replaces the first one. A rejected pack is not offered to the host. The registry returns `false, errorMessage` on failure and retains contextual errors; `/og packs` opens Host and shows the first retained failure in its notice lane without posting it to chat. Valid registration returns `true`.
 
 The public API is:
 
 ```lua
-local ok, errorMessage = OrbitQuiz:RegisterQuestionPack(pack)
-local metadata = OrbitQuiz:GetQuestionPacks()
-local rules, rulesKey = OrbitQuiz:GetPackRules("myguild_trivia")
-local questions, errorMessage = OrbitQuiz:GetQuestions("myguild_trivia")
-local everyQuestion = OrbitQuiz:GetQuestions("all")
-local errors = OrbitQuiz:GetPackErrors()
+local Quiz = OrbitGames.Quiz
+local ok, errorMessage = Quiz:RegisterPack(pack)
+local metadata = OrbitGames.Quiz:GetPacks()
+local rules, rulesKey = OrbitGames.Quiz:GetRules("myguild_trivia")
+local questions, errorMessage = Quiz:GetQuestions("myguild_trivia")
+local everyQuestion = Quiz:GetQuestions("all")
+local errors = Quiz:GetPackErrors()
 ```
 
-Metadata is sorted by title, then ID, and includes `id`, `title`, `version`, `author`, `locale`, `count`, detached normalized `rules` and `rulesKey`. Question reads return fresh copies, including `choices`, `packId`, `packTitle`, `packVersion` and `rulesKey`. `GetPackRules` returns a detached rules table and canonical key; incompatible `all` rules return `nil, "incompatible_pack_rules"`. Mutating originals or returned data cannot change the registry. Unknown packs return `nil, errorMessage`.
+Metadata is sorted by title, then ID, and includes `id`, `title`, `version`, `author`, `locale`, `count`, detached normalized `rules` and `rulesKey`. Question reads return fresh copies, including `choices`, `packId`, `packTitle`, `packVersion` and `rulesKey`. `GetRules` returns a detached rules table and canonical key; incompatible `all` rules return `nil, "incompatible_pack_rules"`. Mutating originals or returned data cannot change the registry. Unknown packs return `nil, errorMessage`.
 
-For a missing pack, check that the folder is directly under `Interface/AddOns`, its TOC basename matches the folder, it is enabled, and its listed Lua filename matches the actual file. Type `/oq packs` to list registered packs and validation errors. Lua syntax/runtime errors happen before registration and appear in WoW's normal error reporting or BugSack; the registry cannot recover a file that never executed.
+For a missing pack, check that the folder is directly under `Interface/AddOns`, its TOC basename matches, it is enabled, and its Lua filename is listed. Open `/og packs`; the Host page shows retained registration errors in its notice lane. Syntax/runtime failures occur before registration and appear in WoW's normal error reporting or BugSack.
 
 Question content is **not** stored in SavedVariables. Result records retain the canonical rule identity needed to validate their historical points. Updating or removing a pack affects future games, not previously earned scores. There is no online pack synchronization or download system.
 

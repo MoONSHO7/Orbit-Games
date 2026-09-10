@@ -1,7 +1,9 @@
-return function(Quiz)
-    local PREFIX = "ORBITQUIZ8"
+return function(Games)
+    local Quiz = Games.Quiz
+    local PREFIX, GAME_TYPE_ID = "ORBITGAMES1", Quiz.id
+    local GAME_PROTOCOL = tostring(Games.GameTypes:Get(GAME_TYPE_ID).protocolVersion)
     local assertions = 0
-    local Comms = Quiz.Comms
+    local Comms = Games.Comms
     local originals = {
         chat = C_ChatInfo,
         enum = Enum,
@@ -88,11 +90,11 @@ return function(Quiz)
             return Enum.SendAddonMessageResult.Success
         end,
     }
-    local function OnMessage(sender, fields)
-        received[#received + 1] = { sender = sender, fields = fields }
+    local function OnMessage(sender, gameTypeId, fields)
+        received[#received + 1] = { sender = sender, gameTypeId = gameTypeId, fields = fields }
     end
-    local function OnError(target, reason)
-        failures[#failures + 1] = { target = target, reason = reason }
+    local function OnError(target, gameTypeId, reason)
+        failures[#failures + 1] = { target = target, gameTypeId = gameTypeId, reason = reason }
     end
     local function Fresh()
         now, realm, restricted, registration = 100, "TestRealm", false, Enum.RegisterAddonMessagePrefixResult.Success
@@ -123,17 +125,17 @@ return function(Quiz)
         return "Player" .. string.char(65 + math.floor(index / 26)) .. string.char(65 + index % 26) .. "-Realm"
     end
     local function Rejected(target, fields, reason, tag)
-        local ok, actual = Comms:Send(target, fields, tag)
+        local ok, actual = Comms:Send(target, GAME_TYPE_ID, fields, tag)
         Same(ok, false, "send rejected")
         Same(actual, reason, "send rejection reason")
     end
 
     Fresh()
-    Same(Quiz.Identity:NormalizeName("  Alice  "), "Alice-TestRealm", "local realm supplied")
-    Same(Quiz.Identity:NormalizeName("Alice-ForeignRealm"), "Alice-ForeignRealm", "foreign realm preserved")
-    Same(Quiz.Identity:NormalizeName("Élise-Éitrigg"), "Élise-Éitrigg", "UTF-8 identity retained")
-    Same(Quiz.Identity:NormalizeName("Alice-Azjol-Nerub"), "Alice-Azjol-Nerub", "realm hyphens retained")
-    Same(Quiz.Identity:NormalizeName("Alice-Kel'Thuzad"), "Alice-Kel'Thuzad", "realm apostrophe retained")
+    Same(Games.Identity:NormalizeName("  Alice  "), "Alice-TestRealm", "local realm supplied")
+    Same(Games.Identity:NormalizeName("Alice-ForeignRealm"), "Alice-ForeignRealm", "foreign realm preserved")
+    Same(Games.Identity:NormalizeName("Élise-Éitrigg"), "Élise-Éitrigg", "UTF-8 identity retained")
+    Same(Games.Identity:NormalizeName("Alice-Azjol-Nerub"), "Alice-Azjol-Nerub", "realm hyphens retained")
+    Same(Games.Identity:NormalizeName("Alice-Kel'Thuzad"), "Alice-Kel'Thuzad", "realm apostrophe retained")
     for _, name in ipairs({
         "",
         " ",
@@ -150,21 +152,21 @@ return function(Quiz)
         "Alice/Realm",
         string.rep("A", 121),
     }) do
-        Same(Quiz.Identity:NormalizeName(name), nil, "invalid name rejected")
+        Same(Games.Identity:NormalizeName(name), nil, "invalid name rejected")
     end
-    Same(Quiz.Identity:NormalizeName(secret), nil, "secret name rejected before use")
-    Same(Quiz.Identity:NormalizeName(12), nil, "numeric name rejected")
+    Same(Games.Identity:NormalizeName(secret), nil, "secret name rejected before use")
+    Same(Games.Identity:NormalizeName(12), nil, "numeric name rejected")
     realm = secret
-    Same(Quiz.Identity:NormalizeName("Alice"), nil, "secret local realm rejected")
+    Same(Games.Identity:NormalizeName("Alice"), nil, "secret local realm rejected")
     Same(
-        Quiz.Identity:NormalizeName("Alice-OtherRealm"),
+        Games.Identity:NormalizeName("Alice-OtherRealm"),
         "Alice-OtherRealm",
         "explicit foreign realm needs no local realm query"
     )
     realm = "Bad Realm"
-    Same(Quiz.Identity:NormalizeName("Alice"), nil, "invalid native realm rejected")
+    Same(Games.Identity:NormalizeName("Alice"), nil, "invalid native realm rejected")
     realm = "TestRealm"
-    Same(#Quiz.Identity:NormalizeName(string.rep("A", 118) .. "-R"), 120, "maximum full name accepted")
+    Same(#Games.Identity:NormalizeName(string.rep("A", 118) .. "-R"), 120, "maximum full name accepted")
 
     registration = Enum.RegisterAddonMessagePrefixResult.DuplicatePrefix
     Check(Comms:Initialize(OnMessage, OnError), "duplicate registration is successful")
@@ -201,6 +203,12 @@ return function(Quiz)
     Rejected("Alice", { "has\000nul" }, "codec_invalid")
     Rejected("Alice", { string.rep("x", 4090) }, "message_too_large")
     Rejected("Alice", { "valid" }, "codec_invalid", secret)
+    local ok, reason = Comms:Send("Alice", "Quiz", { "valid" })
+    Same(ok, false, "mixed-case game type is rejected")
+    Same(reason, "codec_invalid", "invalid game type reports codec failure")
+    ok, reason = Comms:Send("Alice", secret, { "valid" })
+    Same(ok, false, "secret game type is rejected")
+    Same(reason, "codec_invalid", "secret game type reports codec failure")
     Rejected(secret, { "valid" }, "invalid_target")
     Rejected("Alice-", { "valid" }, "invalid_target")
     local manyFields = {}
@@ -221,7 +229,7 @@ return function(Quiz)
         string.rep("é", 180),
         "sender=Impostor",
     }
-    Check(Comms:Send("Alice-OtherRealm", fields, "round"), "valid fields queue")
+    Check(Comms:Send("Alice-OtherRealm", GAME_TYPE_ID, fields, "round"), "valid fields queue")
     Check(Comms:IsBusy(), "queued send is busy")
     Same(#sent, 0, "Send never calls native transport immediately")
     Drain()
@@ -232,6 +240,7 @@ return function(Quiz)
     end
     Same(#received, 1, "message delivered once after complete assembly")
     Same(received[1].sender, "Bob-Remote", "native sender is identity, not a payload field")
+    Same(received[1].gameTypeId, GAME_TYPE_ID, "transport routes the decoded game type outside the payload")
     for index, field in ipairs(fields) do
         Same(received[1].fields[index], field, "length-prefix round trip")
     end
@@ -245,18 +254,21 @@ return function(Quiz)
     Same(#received, 2, "same message id from a different native sender remains distinct")
 
     Fresh()
-    Check(Comms:Send("Alice", { string.rep("x", 4089) }), "4096-byte assembled payload accepted")
+    Check(Comms:Send("Alice", GAME_TYPE_ID, { string.rep("x", 4080) }), "4096-byte assembled payload accepted")
     Drain()
     Check(#sent <= 32, "fragment count remains bounded")
     for _, packet in ipairs(sent) do
         Check(Comms:Receive(PREFIX, packet.text, "WHISPER", "Alice"), "maximum payload fragment accepted")
     end
     Same(#received, 1, "maximum payload assembles")
-    Same(#received[1].fields[1], 4089, "maximum payload preserved exactly")
-    Check(Comms:Receive(PREFIX, Packet("empty", 1, 1, "0:"), "WHISPER", "Alice"), "empty string list accepted")
+    Same(#received[1].fields[1], 4080, "maximum payload preserved exactly")
+    Check(
+        Comms:Receive(PREFIX, Packet("empty", 1, 1, "2:4:quiz1:" .. GAME_PROTOCOL), "WHISPER", "Alice"),
+        "empty string list accepted"
+    )
     Same(#received[2].fields, 0, "empty list remains empty")
     manyFields[33] = nil
-    Check(Comms:Send("Alice", manyFields), "32 fields accepted")
+    Check(Comms:Send("Alice", GAME_TYPE_ID, manyFields), "32 fields accepted")
     local previousCount = #sent
     Drain()
     for index = previousCount + 1, #sent do
@@ -265,7 +277,7 @@ return function(Quiz)
     Same(#received[3].fields, 32, "32 fields decode")
 
     Fresh()
-    local valid = Packet("valid", 1, 1, "1:1:x")
+    local valid = Packet("valid", 1, 1, "3:4:quiz1:" .. GAME_PROTOCOL .. "1:x")
     Same(Comms:Receive("FOREIGN", valid, "WHISPER", "Alice"), false, "foreign prefix ignored")
     Same(
         Comms:Receive("ORBITQUIZ2", valid, "WHISPER", "Alice"),
@@ -341,7 +353,7 @@ return function(Quiz)
     Same(#failures, 0, "invalid inbound traffic does not generate error callback spam")
 
     Fresh()
-    Check(Comms:Send("Alice", { string.rep("x", 450) }), "multipart message queues")
+    Check(Comms:Send("Alice", GAME_TYPE_ID, { string.rep("x", 450) }), "multipart message queues")
     Drain()
     Check(#sent > 2, "multipart test uses three packets")
     Check(Comms:Receive(PREFIX, sent[1].text, "WHISPER", "Alice"), "first fragment accepted")
@@ -426,7 +438,12 @@ return function(Quiz)
     Same(Comms.assemblyCount, 0, "clear releases assemblies")
     for index = 1, 200 do
         Check(
-            Comms:Receive(PREFIX, Packet("complete" .. index, 1, 1, "1:1:x"), "WHISPER", "Alice"),
+            Comms:Receive(
+                PREFIX,
+                Packet("complete" .. index, 1, 1, "3:4:quiz1:" .. GAME_PROTOCOL .. "1:x"),
+                "WHISPER",
+                "Alice"
+            ),
             "recent-cache rollover accepts complete packets"
         )
     end
@@ -435,12 +452,12 @@ return function(Quiz)
         cached = cached + 1
     end
     Same(cached, 128, "recent cache is bounded")
-    Comms:Receive(PREFIX, Packet("complete200", 1, 1, "1:1:x"), "WHISPER", "Alice")
+    Comms:Receive(PREFIX, Packet("complete200", 1, 1, "3:4:quiz1:" .. GAME_PROTOCOL .. "1:x"), "WHISPER", "Alice")
     Same(#received, 200, "newest cache entry stays idempotent")
 
     Fresh()
     for _ = 1, 16 do
-        Check(Comms:Send("Alice", { "x" }), "paced packet queues")
+        Check(Comms:Send("Alice", GAME_TYPE_ID, { "x" }), "paced packet queues")
     end
     Tick(100)
     Same(#sent, 8, "initial burst is eight packets")
@@ -452,7 +469,7 @@ return function(Quiz)
     Same(#sent, 16, "remaining packets send at configured rate")
     Same(Comms:IsBusy(), false, "paced queue fully drained")
     Comms:Clear()
-    Check(Comms:Send("Alice", { "x" }), "queue after clear")
+    Check(Comms:Send("Alice", GAME_TYPE_ID, { "x" }), "queue after clear")
     Tick(101)
     Same(#sent, 16, "clear does not replenish rate tokens")
     Tick(101.125)
@@ -495,7 +512,10 @@ return function(Quiz)
     end
     Same(#largestQuestion, 22, "largest current question includes pack rules within the codec field bound")
     for index = 1, 16 do
-        Check(Comms:Send(Player(index), largestQuestion), "maximum six-choice payload queues for every participant")
+        Check(
+            Comms:Send(Player(index), GAME_TYPE_ID, largestQuestion),
+            "maximum six-choice payload queues for every participant"
+        )
     end
     Same(Comms.queueCount, 112, "maximum bounded question uses seven fragments per participant")
     Drain()
@@ -507,6 +527,7 @@ return function(Quiz)
     end
     Same(#received, 16, "all maximum-size question payloads reassemble")
     for _, message in ipairs(received) do
+        Same(message.gameTypeId, GAME_TYPE_ID, "maximum messages retain their game type route")
         Same(#message.fields, 22, "reassembled maximum question retains every current field")
         Same(message.fields[16], largestQuestion[16], "canonical pack rules survive maximum-size transport")
         Same(message.fields[22], largestQuestion[22], "the sixth maximum-length choice survives transport")
@@ -527,7 +548,7 @@ return function(Quiz)
     }
     for index = 1, 16 do
         Check(
-            Comms:Send(Player(index), largestNameBatch),
+            Comms:Send(Player(index), GAME_TYPE_ID, largestNameBatch),
             "bounded four-name metadata fits every supported participant"
         )
     end
@@ -545,7 +566,7 @@ return function(Quiz)
 
     Fresh()
     for _ = 1, 512 do
-        Check(Comms:Send("Alice", { "x" }, "capacity"), "packet queue slot accepted")
+        Check(Comms:Send("Alice", GAME_TYPE_ID, { "x" }, "capacity"), "packet queue slot accepted")
     end
     Same(Comms.queueCount, 512, "queue cap reached")
     Rejected("Alice", { "extra" }, "queue_full")
@@ -553,14 +574,14 @@ return function(Quiz)
     Same(Comms:IsBusy(), false, "cancel frees queue capacity")
     Same(Comms.queuePeerCount, 0, "cancel releases outbound peer slots")
     for index = 1, 32 do
-        Check(Comms:Send(Player(index), { "x" }), "outbound peer accepted")
+        Check(Comms:Send(Player(index), GAME_TYPE_ID, { "x" }), "outbound peer accepted")
     end
     Rejected(Player(33), { "x" }, "queue_full")
     Same(Comms.queueCount, 32, "failed peer allocation leaves queue unchanged")
 
     Fresh()
-    Check(Comms:Send("Alice", { string.rep("x", 1800) }, "obsolete"), "long tagged message queues")
-    Check(Comms:Send("Bob", { "next" }, "current"), "next tagged message queues")
+    Check(Comms:Send("Alice", GAME_TYPE_ID, { string.rep("x", 1800) }, "obsolete"), "long tagged message queues")
+    Check(Comms:Send("Bob", GAME_TYPE_ID, { "next" }, "current"), "next tagged message queues")
     Tick(100)
     Same(#sent, 8, "partial tagged message sends initial burst")
     Comms:Cancel("different")
@@ -581,7 +602,7 @@ return function(Quiz)
     Rejected("Alice", { "hello" }, "addon_lockdown")
     Same(Comms:Receive(PREFIX, valid, "WHISPER", "Alice"), false, "receive paused in activating state")
     Comms.suspended = false
-    Check(Comms:Send("Alice", { "hello" }), "packet queues when safe")
+    Check(Comms:Send("Alice", GAME_TYPE_ID, { "hello" }), "packet queues when safe")
     Comms.suspended = true
     Tick(100)
     Same(#sent, 0, "queued sends do not bypass activating state")
@@ -594,16 +615,17 @@ return function(Quiz)
     Same(#sent, 1, "queued send proceeds after clear")
 
     Fresh()
-    Check(Comms:Send("Alice", { "hello" }), "expiring message queues")
+    Check(Comms:Send("Alice", GAME_TYPE_ID, { "hello" }), "expiring message queues")
     Tick(115)
     Same(#sent, 0, "expired outbound message is never sent")
     Same(#failures, 1, "expiry reports one terminal failure")
+    Same(failures[1].gameTypeId, GAME_TYPE_ID, "expiry error retains the game type route")
     Same(failures[1].reason, "send_failed", "expiry failure code")
     Same(Comms:IsBusy(), false, "expired queue clears")
 
     Fresh()
     nativeResults[1] = { result = Enum.SendAddonMessageResult.AddonMessageThrottle }
-    Check(Comms:Send("Alice", { "hello" }), "retry message queues")
+    Check(Comms:Send("Alice", GAME_TYPE_ID, { "hello" }), "retry message queues")
     Tick(100)
     Same(#sent, 1, "first throttled attempt occurs once")
     Check(Comms:IsBusy(), "prefix throttle retains packet")
@@ -619,7 +641,7 @@ return function(Quiz)
     for index = 1, 5 do
         nativeResults[index] = { result = Enum.SendAddonMessageResult.AddonMessageThrottle }
     end
-    Comms:Send("Alice", { "hello" })
+    Comms:Send("Alice", GAME_TYPE_ID, { "hello" })
     for _, at in ipairs({ 100, 100.5, 101.5, 103.5, 105.5 }) do
         Tick(at)
     end
@@ -630,7 +652,7 @@ return function(Quiz)
 
     Fresh()
     nativeResults[1] = { result = Enum.SendAddonMessageResult.ChannelThrottle }
-    Comms:Send("Alice", { "hello" })
+    Comms:Send("Alice", GAME_TYPE_ID, { "hello" })
     Tick(100)
     Tick(101)
     Same(#sent, 1, "channel throttle is not blindly resent")
@@ -647,7 +669,7 @@ return function(Quiz)
     }) do
         Fresh()
         nativeResults[1] = { result = case.value }
-        Comms:Send("Alice", { string.rep("x", 450) })
+        Comms:Send("Alice", GAME_TYPE_ID, { string.rep("x", 450) })
         Tick(100)
         Same(#sent, 1, "terminal native error drops remaining fragments")
         Same(Comms:IsBusy(), false, "terminal error removes whole message")
@@ -658,8 +680,8 @@ return function(Quiz)
 
     Fresh()
     nativeResults[1] = { result = Enum.SendAddonMessageResult.AddOnMessageLockdown }
-    Comms:Send("Alice", { "first" })
-    Comms:Send("Bob", { "second" })
+    Comms:Send("Alice", GAME_TYPE_ID, { "first" })
+    Comms:Send("Bob", GAME_TYPE_ID, { "second" })
     Tick(100)
     Tick(101)
     Same(#sent, 1, "native lockdown immediately halts subsequent traffic")
@@ -668,10 +690,10 @@ return function(Quiz)
     Same(failures[1].reason, "addon_lockdown", "native lockdown error code")
 
     Fresh()
-    Comms:Send("Alice", { "first" })
+    Comms:Send("Alice", GAME_TYPE_ID, { "first" })
     sendHook = function()
         sendHook = nil
-        Check(Comms:Send("Bob", { "response" }), "native callback can queue a response")
+        Check(Comms:Send("Bob", GAME_TYPE_ID, { "response" }), "native callback can queue a response")
         Comms:Tick(now)
     end
     Tick(100)
@@ -680,11 +702,11 @@ return function(Quiz)
     Same(#sent, 2, "callback-generated response waits until following tick")
 
     Fresh()
-    Comms:Send("Alice", { "first" }, "old")
+    Comms:Send("Alice", GAME_TYPE_ID, { "first" }, "old")
     sendHook = function()
         sendHook = nil
         Comms:Clear()
-        Comms:Send("Bob", { "new" }, "new")
+        Comms:Send("Bob", GAME_TYPE_ID, { "new" }, "new")
     end
     Tick(100)
     Same(#sent, 1, "clear during native call stops current drain")
@@ -695,12 +717,12 @@ return function(Quiz)
 
     Fresh()
     nativeResults[1] = { result = Enum.SendAddonMessageResult.TargetOffline }
-    Comms.onError = function(target, reason)
-        OnError(target, reason)
-        Comms:Send("Bob", { "response" })
+    Comms.onError = function(target, gameTypeId, reason)
+        OnError(target, gameTypeId, reason)
+        Comms:Send("Bob", GAME_TYPE_ID, { "response" })
         Comms:Tick(now)
     end
-    Comms:Send("Alice", { "first" })
+    Comms:Send("Alice", GAME_TYPE_ID, { "first" })
     Tick(100)
     Same(#sent, 1, "error callback cannot recursively drain")
     Same(#failures, 1, "error callback invoked once")
@@ -709,15 +731,15 @@ return function(Quiz)
 
     Fresh()
     for _ = 1, 3 do
-        Comms:Send("Alice", { "first" })
+        Comms:Send("Alice", GAME_TYPE_ID, { "first" })
     end
     Tick(115)
     Same(#failures, 1, "same-target expiry failures coalesce")
-    Comms:Send("Alice", { "first" })
+    Comms:Send("Alice", GAME_TYPE_ID, { "first" })
     Tick(115)
     local beforeClear = sent[#sent].text
     Comms:Clear()
-    Comms:Send("Alice", { "second" })
+    Comms:Send("Alice", GAME_TYPE_ID, { "second" })
     Tick(111)
     Check(beforeClear ~= sent[#sent].text, "clear does not reuse message identifiers")
 

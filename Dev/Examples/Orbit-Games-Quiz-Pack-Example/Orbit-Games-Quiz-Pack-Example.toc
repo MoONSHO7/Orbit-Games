@@ -1,0 +1,8 @@
+## Interface: 120100
+## Title: Orbit-Games: Example Quiz Pack
+## Notes: Independent Quiz pack template. Requires Orbit-Games; customize and distribute separately.
+## Author: Your name
+## Version: 1.0
+## Dependencies: Orbit-Games
+
+Questions.lua

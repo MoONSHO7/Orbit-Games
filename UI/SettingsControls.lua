@@ -1,4 +1,4 @@
-local _, Quiz = ...
+local _, Games = ...
 local LABEL_WIDTH = 100
 local LABEL_GAP_PIXELS = 3
 local VALUE_WIDTH = 65
@@ -10,18 +10,19 @@ local LABEL_FONT = "GameFontHighlight"
 local VALUE_FONT = "GameFontHighlightSmall"
 local VALUE_COLOR = { 1, 0.82, 0, 1 }
 
-Quiz.SettingsControls = { rows = {} }
-local Settings = Quiz.SettingsControls
+Games.SettingsControls = { rows = {} }
+local Settings = Games.SettingsControls
 
 local function LayoutRow(row)
     local scale = row:GetEffectiveScale()
     local gap = PixelUtil.GetNearestPixelSize(0, scale, LABEL_GAP_PIXELS)
-    local valueWidth = PixelUtil.GetNearestPixelSize(VALUE_WIDTH, scale)
+    local labelWidth = PixelUtil.GetNearestPixelSize(row.labelWidth or LABEL_WIDTH, scale)
+    local valueWidth = PixelUtil.GetNearestPixelSize(row.valueWidth or VALUE_WIDTH, scale)
     row.Label:ClearAllPoints()
     PixelUtil.SetPoint(row.Label, "TOPLEFT", row, "TOPLEFT", 0, 0)
-    PixelUtil.SetSize(row.Label, LABEL_WIDTH, row:GetHeight())
+    PixelUtil.SetSize(row.Label, labelWidth, row:GetHeight())
     local control = row.Control or row.Slider
-    local left = row.Label:GetWidth() + gap
+    local left = row.controlX and PixelUtil.GetNearestPixelSize(row.controlX, scale) or row.Label:GetWidth() + gap
     local height = row.Control and PICKER_HEIGHT or SLIDER_HEIGHT
     PixelUtil.SetSize(control, row:GetWidth() - left - valueWidth, height)
     control:ClearAllPoints()
@@ -36,25 +37,28 @@ local function LayoutRow(row)
     end
 end
 
-local function ConfigureRow(row, label, width, height)
+local function ConfigureRow(row, label, width, height, options)
     row.layoutHeight = height
+    row.labelWidth = options and options.labelWidth
+    row.controlX = options and options.controlX
+    row.valueWidth = options and options.valueWidth
     PixelUtil.SetSize(row, width, height)
     row.Label:SetFontObject(LABEL_FONT)
     row.Label:SetText(label)
     row.Label:SetJustifyH("LEFT")
     row.Label:SetJustifyV("MIDDLE")
     row.Label:SetWordWrap(false)
+    row.Label:SetNonSpaceWrap(false)
     Settings.rows[row] = true
     row:SetScript("OnSizeChanged", LayoutRow)
     LayoutRow(row)
     row:Show()
 end
 
-function Settings:Slider(parent, label, width, value, minimum, maximum, step, formatter, action)
+function Settings:Slider(parent, label, width, value, minimum, maximum, step, formatter, action, options)
     local row = CreateFrame("Frame", nil, parent, "EditModeSettingSliderTemplate")
-    -- The template captures Blizzard dialog callbacks during OnLoad; this independent row must detach those handles.
     row.cbrHandles:Unregister()
-    row.Value = row:CreateFontString(nil, "OVERLAY", VALUE_FONT)
+    row.Value = row:CreateFontString(nil, "OVERLAY", options and options.valueFont or VALUE_FONT)
     row.Value:SetJustifyH("RIGHT")
     row.Value:SetJustifyV("MIDDLE")
     row.Value:SetTextColor(unpack(VALUE_COLOR))
@@ -82,14 +86,20 @@ function Settings:Slider(parent, label, width, value, minimum, maximum, step, fo
         self.Value:SetText(formatter(newValue))
         self.loadingValue = nil
     end
-    ConfigureRow(row, label, width, SLIDER_HEIGHT)
+    function row:SetEnabled(enabled)
+        slider:SetEnabled(enabled)
+    end
+    function row:IsEnabled()
+        return slider:IsSliderEnabled()
+    end
+    ConfigureRow(row, label, width, SLIDER_HEIGHT, options)
     return row
 end
 
 function Settings:Font(parent, label, width, action)
     local row = CreateFrame("Frame", nil, parent)
     row.Label = row:CreateFontString(nil, "ARTWORK", LABEL_FONT)
-    row.Control = Quiz.FontPicker:Create(row, width - LABEL_WIDTH - VALUE_WIDTH, action)
+    row.Control = Games.FontPicker:Create(row, width - LABEL_WIDTH - VALUE_WIDTH, action)
     ConfigureRow(row, label, width, PICKER_ROW_HEIGHT)
     return row
 end

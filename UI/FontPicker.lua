@@ -1,6 +1,6 @@
-local _, Quiz = ...
-local L = Quiz.L
-local Controls = Quiz.Controls
+local _, Games = ...
+local L = Games.L
+local Controls = Games.Controls
 local HEIGHT = 24
 local PREVIEW_SIZE = 12
 local FONT_OBJECT = "GameFontHighlight"
@@ -51,8 +51,8 @@ local PICKER_COLORS = {
     text = { 1, 1, 1, 1 },
 }
 
-Quiz.FontPicker = { nextMenuID = 0 }
-local FontPicker = Quiz.FontPicker
+Games.FontPicker = { nextMenuID = 0 }
+local FontPicker = Games.FontPicker
 
 local function RefreshState(control)
     Controls:Outline(
@@ -66,10 +66,9 @@ end
 local function PaintText(label, name, size)
     label:SetFontObject(FONT_OBJECT)
     local nativePath = label:GetFont()
-    local path = Quiz.Media:ResolveFont(name)
+    local path = Games.Media:ResolveFont(name)
     local available, applied = name == "" or path ~= nil, false
     if path then
-        -- Registered font paths belong to other addons and can still fail native asset loading.
         local ok, success = pcall(label.SetFont, label, path, size, "")
         applied = ok and success
         available = applied
@@ -171,7 +170,7 @@ local function CreateRow(popup)
             return
         end
         local name = self.value
-        if name ~= "" and not Quiz.Media:ResolveFont(name) then
+        if name ~= "" and not Games.Media:ResolveFont(name) then
             popup:Refresh()
             return
         end
@@ -216,14 +215,14 @@ end
 local function RebuildItems(popup)
     popup.allItems = { { name = "", label = L.W_WIDGET_FONT_DEFAULT } }
     local selected = popup.owner.selectedName
-    if selected ~= "" and not Quiz.Media:ResolveFont(selected) then
+    if selected ~= "" and not Games.Media:ResolveFont(selected) then
         popup.allItems[#popup.allItems + 1] = {
             name = selected,
             label = L.W_WIDGET_FONT_UNAVAILABLE_F:format(selected),
             unavailable = true,
         }
     end
-    for _, name in ipairs(Quiz.Media:GetFontNames()) do
+    for _, name in ipairs(Games.Media:GetFontNames()) do
         popup.allItems[#popup.allItems + 1] = { name = name, label = name }
     end
     local width = math.max(WIDTH, popup.owner:GetWidth())
@@ -260,7 +259,7 @@ end
 
 local function CreateMenu(owner, onSelect)
     FontPicker.nextMenuID = FontPicker.nextMenuID + 1
-    local name = "OrbitQuizFontMenu" .. FontPicker.nextMenuID
+    local name = "OrbitGamesFontMenu" .. FontPicker.nextMenuID
     local popup = CreateFrame("Frame", name, UIParent)
     popup:Hide()
     popup:SetFrameStrata(POPUP_STRATA)
@@ -295,7 +294,6 @@ local function CreateMenu(owner, onSelect)
     search:HookScript("OnEscapePressed", function()
         popup:Hide()
     end)
-    -- Retain search focus after Enter/clear so Escape dismisses this menu before the settings window.
     local function KeepSearchFocus()
         if popup:IsShown() then
             search:SetFocus()

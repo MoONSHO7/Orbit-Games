@@ -1,5 +1,5 @@
-return function(Quiz)
-    local REMOVED_CHAT_SETTINGS = { "bridgeChat", "channel", "customChannel", "channelPassword", "answerMode" }
+return function(Games)
+    local Quiz = Games.Quiz
     local assertions = 0
     local function Check(value, message)
         assertions = assertions + 1
@@ -23,11 +23,6 @@ return function(Quiz)
         end
         for key in pairs(actual) do
             Check(expected[key] ~= nil, message .. " has no unexpected " .. tostring(key))
-        end
-    end
-    local function NoChatSettings(settings, message)
-        for _, key in ipairs(REMOVED_CHAT_SETTINGS) do
-            Same(settings[key], nil, message .. ": " .. key)
         end
     end
     local function OldChatSettings()
@@ -57,18 +52,12 @@ return function(Quiz)
         end
         return questions
     end
-    local function Settings(count)
-        return {
-            league = "Default",
-            packId = "all",
-            questionCount = count or 2,
-            duration = Quiz.ANSWER_SECONDS,
-            autoAdvance = false,
-            hostName = "",
-        }
+    local function Settings()
+        return { packId = "all" }
     end
     local function NewGame(count, deckSize, random)
-        local game, reason = Quiz.Game.New(Settings(count), Questions(deckSize or count), random or KeepOrder)
+        local rules = Quiz.Rules.Normalize({ repeatQuestions = false, questionLimit = count })
+        local game, reason = Quiz.Model.New(Settings(), Questions(deckSize or count), random or KeepOrder, rules)
         Check(game ~= nil, reason)
         return game
     end
@@ -78,46 +67,6 @@ return function(Quiz)
         Check(game:OpenQuestion(now), "question should open")
         return round
     end
-    local function ClosedWrong(id, name)
-        return {
-            id = id,
-            questionKey = "test:q1",
-            number = 1,
-            duration = 15,
-            scoringVersion = 2,
-            correctCount = 0,
-            totalAnswers = 1,
-            answers = {
-                {
-                    guid = "Player-1-A",
-                    name = name or "Alice-Realm",
-                    choiceIndex = 2,
-                    correct = false,
-                    elapsed = 1,
-                    points = -0.9,
-                },
-            },
-        }
-    end
-    local function ClosedCorrect(id, elapsed)
-        local result = ClosedWrong(id)
-        result.correctCount = 1
-        result.answers[1].choiceIndex = 1
-        result.answers[1].correct = true
-        result.answers[1].elapsed = elapsed or 1
-        result.answers[1].points = Quiz.Scoring.CalculateLegacy(true, result.answers[1].elapsed, result.duration)
-        return result
-    end
-    local function PreviousRound(id, correct, elapsed, duration, tagged)
-        local result = ClosedWrong(id)
-        result.duration, result.scoringVersion = duration or 20, tagged and 1 or nil
-        result.correctCount = correct and 1 or 0
-        local answer = result.answers[1]
-        answer.correct, answer.choiceIndex, answer.elapsed = correct, correct and 1 or 2, elapsed or 1
-        answer.points = correct and (10 + math.floor(result.duration - answer.elapsed + 0.0000001)) / 10 or 0
-        return result
-    end
-
     Same(Quiz.ANSWER_SECONDS, 15, "all locally hosted answer windows are fixed at fifteen seconds")
     Same(Quiz.Scoring.VERSION, 3, "explicit pack rules use the new configurable scoring version")
     Same(
@@ -206,12 +155,12 @@ return function(Quiz)
     Same(game.completed, 1, "one finalized question")
     Same(game.state, "results", "results state")
     Same(game:GetStandings()[1].name, "Bob-Realm", "standings sort by final points")
-    Same(game:GetStandings()[2].score, -0.5, "incorrect final selection can leave the player below zero")
+    Same(game:GetStandings()[2].score, 0, "incorrect final selection floors the visible total at zero")
     Same(game:GetStandings()[2].answers, 1, "three selections still count as one finalized answer")
     Same(game:GetStandings()[2].incorrect, 1, "only the final selection determines correctness count")
     Check(game:CloseQuestion(130) == nil, "question only closes once")
     Same(game.completed, 1, "duplicate close cannot increment question count")
-    Same(game:GetStandings()[2].score, -0.5, "duplicate close cannot change scores")
+    Same(game:GetStandings()[2].score, 0, "duplicate close cannot change scores")
     Check(not game:Submit("Player-1-D", "Dave-Realm", 7, 1, 109), "post-close answer rejected even with old time")
     Check(game:Pause("break"), "pause after results")
     Same(game.round, round, "pausing results preserves scored round")
@@ -224,9 +173,28 @@ return function(Quiz)
     result = game:CloseQuestion(220)
     Same(game.state, "finished", "target finalized rounds finishes game")
     Same(game.completed, 2, "two finalized rounds")
-    Same(game:GetStandings()[1].score, 1.9, "a later correct answer can recover a previous penalty")
+    Same(game:GetStandings()[1].score, 2.4, "a zero-floored penalty cannot become hidden score debt")
     Check(not game:Pause("late"), "finished game cannot be paused")
     Check(game:PrepareQuestion(9) == nil, "finished game cannot prepare")
+
+    local floorSequence = NewGame(2)
+    local floorRound = Open(floorSequence, 50, 0)
+    Check(
+        floorSequence:Submit("Player-Floor", "Floor-Realm", floorRound.id, 2, 0),
+        "a fast wrong answer is accepted at zero"
+    )
+    floorSequence:CloseQuestion(15)
+    Same(floorSequence:GetStandings()[1].score, 0, "a wrong answer cannot lower the current score below zero")
+    floorRound = Open(floorSequence, 51, 20)
+    Check(
+        floorSequence:Submit("Player-Floor", "Floor-Realm", floorRound.id, floorRound.correctIndex, 34.999),
+        "a near-deadline correct answer is accepted after a floored penalty"
+    )
+    local floorResult = floorSequence:CloseQuestion(35)
+    Same(floorResult.answers[1].points, 1, "near-deadline correctness earns the base point")
+    Same(floorSequence:GetStandings()[1].score, 1, "a prior floored penalty cannot consume a correct answer")
+    Check(floorSequence:CloseQuestion(35) == nil, "a finalized floor sequence cannot close twice")
+    Same(floorSequence:GetStandings()[1].score, 1, "duplicate closure cannot record the recovered point twice")
 
     local revised = NewGame(1)
     local revisedRound = Open(revised, 9, 0)
@@ -311,56 +279,42 @@ return function(Quiz)
     local guessResult = guesses:CloseQuestion(15)
     Same(guessResult.answers[1].elapsed, 14.75, "finalization retains only the final changed selection time")
     Same(guessResult.answers[1].points, -0.5, "only the final wrong selection applies its penalty")
-    Same(guesses:GetStandings()[1].score, -0.5, "transient guesses do not stack their penalties")
+    Same(guesses:GetStandings()[1].score, 0, "transient guesses do not stack penalties below zero")
     Same(guesses:GetStandings()[1].incorrect, 1, "multiple changes still count as one incorrect answer")
 
     local copiedSettings = Settings(1)
     copiedSettings.extra = { label = "original" }
     local copiedQuestions = Questions(2)
     local originalChoice = copiedQuestions[1].choices[1]
-    local copiedGame = Quiz.Game.New(copiedSettings, copiedQuestions, KeepOrder)
-    copiedSettings.duration = 60
+    local copiedGame = Quiz.Model.New(copiedSettings, copiedQuestions, KeepOrder)
     copiedSettings.extra.label = "modified"
     copiedQuestions[1].prompt = "modified"
     copiedQuestions[1].choices[1] = "modified"
-    Same(copiedGame.settings.duration, 15, "settings input is copied with the fixed answer window")
     Same(copiedGame.settings.extra.label, "original", "nested input is copied")
     local copiedRound = Open(copiedGame, 11, 0)
     Same(copiedRound.prompt, "Question 1", "question input is copied")
     Same(copiedRound.choices[1], originalChoice, "choice input is copied")
 
-    for _, oldDuration in ipairs({ 20, 60, 0, 1, 600, math.huge, "60", false, {} }) do
-        local fixedSettings = Settings(1)
-        fixedSettings.duration = oldDuration
-        local fixedGame = Quiz.Game.New(fixedSettings, Questions(1), KeepOrder)
-        Check(fixedGame ~= nil, "removed duration option never controls direct game creation")
-        Same(fixedGame.settings.duration, 15, "game model normalizes every supplied duration to fifteen")
-        Same(fixedSettings.duration, oldDuration, "normalization never mutates caller settings")
-        fixedGame.settings.duration = 60
-        local fixedRound = Open(fixedGame, 1, 100)
-        Same(fixedRound.deadline, 115, "even a mutated game setting cannot extend the answer clock")
-        fixedGame.settings.duration = 1
-        Check(fixedGame:Submit("Fixed", "Fixed-Realm", 1, fixedRound.correctIndex, 104), "fixed-window answer accepts")
-        Same(fixedRound.answers.Fixed.points, 2.1, "mutable settings cannot change correct-answer timing points")
-        fixedGame.settings.duration = 600
-        Check(not fixedGame:Submit("Fixed", "Fixed-Realm", 1, fixedRound.correctIndex, 115.01), "fixed cutoff rejects")
-        Check(fixedGame:CloseQuestion(114.99) == nil, "fixed round cannot close before fifteen seconds")
-        local fixedResult = fixedGame:CloseQuestion(115)
-        Same(fixedResult.duration, 15, "history records the actual fifteen-second answer window")
-        Same(fixedResult.scoringVersion, 2, "history identifies the rules that scored the result")
-        Same(fixedResult.answers[1].points, 2.1, "mutable settings cannot re-score a finalized answer")
-    end
-    local noDuration = Settings(1)
-    noDuration.duration = nil
-    local defaultClock = Quiz.Game.New(noDuration, Questions(1), KeepOrder)
-    Check(defaultClock ~= nil, "game callers no longer need to specify a duration")
-    Same(Open(defaultClock, 1, 0).deadline, 15, "omitted duration still creates the fixed window")
+    local fixedGame = Quiz.Model.New(Settings(), Questions(1), KeepOrder)
+    fixedGame.settings.duration = 60
+    local fixedRound = Open(fixedGame, 1, 100)
+    Same(fixedRound.deadline, 115, "mode settings cannot extend the pack-owned answer clock")
+    fixedGame.settings.duration = 1
+    Check(fixedGame:Submit("Fixed", "Fixed-Realm", 1, fixedRound.correctIndex, 104), "fixed-window answer accepts")
+    Same(fixedRound.answers.Fixed.points, 2.1, "mode settings cannot change pack-owned timing points")
+    fixedGame.settings.duration = 600
+    Check(not fixedGame:Submit("Fixed", "Fixed-Realm", 1, fixedRound.correctIndex, 115.01), "fixed cutoff rejects")
+    Check(fixedGame:CloseQuestion(114.99) == nil, "fixed round cannot close before fifteen seconds")
+    local fixedResult = fixedGame:CloseQuestion(115)
+    Same(fixedResult.duration, 15, "history records the pack-owned answer window")
+    Same(fixedResult.scoringVersion, 3, "history identifies the pack rules that scored the result")
+    Same(fixedResult.answers[1].points, 2.1, "mode settings cannot re-score a finalized answer")
 
     local retiredGameSettings = Settings(1)
     for key, value in pairs(OldChatSettings()) do
         retiredGameSettings[key] = value
     end
-    local retiredGame = Quiz.Game.New(retiredGameSettings, Questions(1), KeepOrder)
+    local retiredGame = Quiz.Model.New(retiredGameSettings, Questions(1), KeepOrder)
     Check(retiredGame ~= nil, "direct model callers can still supply ignored retired chat settings")
     local retiredRound = Open(retiredGame, 1, 100)
     Same(retiredRound.deadline, 115, "retired chat configuration never delays the model answer clock")
@@ -419,25 +373,22 @@ return function(Quiz)
     Same(stopped.round, nil, "stop discards live answers")
     Same(#stopped:GetStandings(), 0, "stop does not score active answers")
     Check(not stopped:Resume(), "stopped game cannot resume")
-    Check(Quiz.Game.New(Settings(), {}) == nil, "empty deck rejected")
+    Check(Quiz.Model.New(Settings(), {}) == nil, "empty deck rejected")
     local duplicateQuestions = Questions(2)
     duplicateQuestions[2].key = duplicateQuestions[1].key
-    Check(Quiz.Game.New(Settings(), duplicateQuestions) == nil, "duplicate keys rejected")
-    Check(Quiz.Game.New(Settings(), Questions(2), function()
+    Check(Quiz.Model.New(Settings(), duplicateQuestions) == nil, "duplicate keys rejected")
+    Check(Quiz.Model.New(Settings(), Questions(2), function()
         return 0
     end) == nil, "invalid RNG rejected")
 
-    local continuousSettings = Settings(1)
-    continuousSettings.continuous = true
-    continuousSettings.questionCount = nil
+    local continuousSettings = Settings()
     local continuousDeckSize = 61
-    local continuous = Quiz.Game.New(continuousSettings, Questions(continuousDeckSize), KeepOrder)
+    local continuous = Quiz.Model.New(continuousSettings, Questions(continuousDeckSize), KeepOrder)
     Check(continuous ~= nil, "continuous mode does not require the unused finite question count")
     Same(continuous.continuous, true, "continuous mode is explicit on the game")
     Same(continuous.cycle, 1, "first shuffled cycle starts at one")
     Same(continuous.total, continuousDeckSize, "continuous total is the entire selected deck")
     Same(continuous.usedIds, nil, "continuous mode never allocates a growing question-ID map")
-    local continuousDb = Quiz.Store:Initialize(nil)
     local cycleKeys = {}
     local previousKey
     local continuousRounds = continuousDeckSize * 3
@@ -463,7 +414,6 @@ return function(Quiz)
         Check(closed ~= nil, "continuous question closes")
         Same(closed.cycle, expectedCycle, "result records its cycle")
         Same(continuous.state, "results", "continuous close never finishes the game")
-        Check(Quiz.Store:RecordRound("Continuous", "PUBLIC", closed), "cycle result persists beyond fifty questions")
     end
     Same(continuous.completed, continuousRounds, "completed counts all session rounds across cycles")
     Same(continuous.total, continuousDeckSize, "cycling never changes the deck total")
@@ -472,13 +422,6 @@ return function(Quiz)
     Same(continuous.lastQuestionId, continuousRounds, "continuous ID memory is one high watermark")
     Same(continuous:GetStandings()[1].score, continuousRounds * 24 / 10, "session points continue across cycles")
     Same(continuous:GetStandings()[1].correct, continuousRounds, "session answer counts continue across cycles")
-    Same(#continuousDb.leagues.Continuous.PUBLIC.history, 50, "continuous saved history remains bounded")
-    Same(
-        continuousDb.leagues.Continuous.PUBLIC.history[50].number,
-        61,
-        "saved history accepts within-cycle numbers above fifty"
-    )
-    Same(continuousDb.leagues.Continuous.PUBLIC.history[50].cycle, 3, "saved history retains cycle identity")
     local lastCycleResult = continuous.lastResult
     local lastCycleRound = continuous.round
     Check(continuous:PrepareQuestion(continuousRounds) == nil, "continuous ID cannot be reused")
@@ -498,16 +441,8 @@ return function(Quiz)
     Same(continuous.round, nil, "continuous stop discards the exposed unscored question")
     Check(continuous:PrepareQuestion(continuousRounds + 2) == nil, "stopped continuous game cannot prepare again")
     Same(continuous:GetStandings()[1].score, continuousRounds * 24 / 10, "stopping keeps finalized session scores")
-    Check(Quiz.Store:Initialize(continuousDb) ~= nil, "continuous history reloads")
-    Same(
-        Quiz.Store:GetStandings("Continuous", "PUBLIC")[1].score,
-        continuousRounds * 24 / 10,
-        "continuous totals survive reload"
-    )
-
-    local boundarySettings = Settings(1)
-    boundarySettings.continuous = true
-    local boundaries = Quiz.Game.New(boundarySettings, Questions(2), function()
+    local boundarySettings = Settings()
+    local boundaries = Quiz.Model.New(boundarySettings, Questions(2), function()
         return 1
     end)
     previousKey = nil
@@ -519,7 +454,7 @@ return function(Quiz)
     end
     Same(boundaries.cycle, 6, "two-question deck keeps cycling through corrected shuffles")
 
-    local voidCycles = Quiz.Game.New(boundarySettings, Questions(3), KeepOrder)
+    local voidCycles = Quiz.Model.New(boundarySettings, Questions(3), KeepOrder)
     previousKey = nil
     for id = 1, 3 do
         local active = voidCycles:PrepareQuestion(id)
@@ -542,7 +477,7 @@ return function(Quiz)
     Same(afterVoids.number, 1, "cycle number resets after voided deck")
     Check(afterVoids.key ~= previousKey, "voided boundary question does not immediately repeat")
 
-    local single = Quiz.Game.New(boundarySettings, Questions(1), KeepOrder)
+    local single = Quiz.Model.New(boundarySettings, Questions(1), KeepOrder)
     for id = 1, 8 do
         local active = Open(single, id, id * 30)
         Same(active.number, 1, "single-question pack always displays position one")
@@ -564,7 +499,7 @@ return function(Quiz)
     Same(single.usedIds, nil, "single-pack continuous ID memory remains bounded")
 
     local failShuffle = false
-    local failedCycle = Quiz.Game.New(boundarySettings, Questions(2), function(maximum)
+    local failedCycle = Quiz.Model.New(boundarySettings, Questions(2), function(maximum)
         return failShuffle and 0 or maximum
     end)
     for id = 1, 2 do
@@ -578,1412 +513,107 @@ return function(Quiz)
     Same(failedCycle.state, "results", "failed shuffle leaves previous results available")
     failShuffle = false
     Check(failedCycle:PrepareQuestion(3) ~= nil, "valid retry can reuse the unconsumed token")
-    local invalidContinuous = Settings()
-    invalidContinuous.continuous = "yes"
-    Check(Quiz.Game.New(invalidContinuous, Questions(2)) == nil, "non-boolean continuous mode rejects")
+    Check(Quiz.Model.New(false, Questions(2)) == nil, "non-table settings reject")
     local finiteIds = NewGame(2)
     Open(finiteIds, 10, 0)
     finiteIds:CloseQuestion(20)
-    Check(finiteIds:PrepareQuestion(2) ~= nil, "finite mode preserves its existing unique but unordered ID contract")
+    Check(finiteIds:PrepareQuestion(2) == nil, "finite mode also rejects an older question ID")
 
     local store = Quiz.Store
     local db = store:Initialize(nil)
-    Check(db ~= nil, "fresh database initializes")
-    Same(db.schemaVersion, 6, "fresh database uses the personal-pack scoring schema")
+    Check(db ~= nil, "fresh Quiz database initializes")
+    Same(db.schemaVersion, 7, "fresh database uses the current Quiz mode schema")
+    SameTable(db.settings, { packId = "all" }, "fresh database persists only Quiz pack selection")
     Same(next(db.leagues), nil, "fresh current-scoring boards are empty")
     Same(next(db.legacyLeagues), nil, "fresh installations have no old-scale archive")
-    Same(#store:GetLegacyStandings("Missing", "PUBLIC"), 0, "missing legacy league returns empty standings")
-    local widgetPosition = store:GetWidgetPosition()
-    Same(widgetPosition.x, 0.5, "widget defaults to normalized horizontal center")
-    Same(widgetPosition.y, 0.65, "widget defaults above normalized screen center")
-    widgetPosition.x = 0.1
-    Same(store:GetWidgetPosition().x, 0.5, "position getter never exposes the saved table")
-    Check(store:SaveWidgetPosition(0.25, 0.75), "normalized widget position saves")
-    Same(db.widgetPosition.x, 0.25, "position saves outside gameplay configuration")
-    Same(store:GetSettings().widgetPosition, nil, "widget position never becomes a game setting")
-    Check(store:SaveSettings({ duration = 30 }), "game settings remain independently writable")
-    Same(store:GetWidgetPosition().x, 0.25, "game settings cannot reset widget position")
-    Same(store:GetWidgetPosition().y, 0.75, "game settings preserve vertical widget position")
-    for _, edge in ipairs({ 0, 1 }) do
-        Check(store:SaveWidgetPosition(edge, edge), "screen edges are valid normalized positions")
-        Same(store:GetWidgetPosition().x, edge, "edge x coordinate persists")
-        Same(store:GetWidgetPosition().y, edge, "edge y coordinate persists")
-    end
-    for _, invalid in ipairs({ -0.01, 1.01, math.huge, -math.huge, 0 / 0, false, "0.5", {} }) do
-        local ok, reason = store:SaveWidgetPosition(invalid, 0.5)
-        Check(not ok, "invalid horizontal position rejects")
-        Same(reason, "invalid_widget_position", "position validation has a stable failure code")
-        Check(not store:SaveWidgetPosition(0.5, invalid), "invalid vertical position rejects")
-        Same(store:GetWidgetPosition().x, 1, "invalid positions leave stored x untouched")
-        Same(store:GetWidgetPosition().y, 1, "invalid positions leave stored y untouched")
-    end
-    Check(not store:SaveWidgetPosition(nil, 0.5), "missing x is rejected")
-    Check(not store:SaveWidgetPosition(0.5, nil), "missing y is rejected")
-    Check(store:SaveWidgetPosition(0.2, 0.8), "valid position remains writable after invalid inputs")
-    Same(store:GetSettings().duration, 15, "moving a widget cannot alter the fixed gameplay timing")
-    Check(store:SaveSettings({ duration = 20 }), "legacy duration values normalize during settings save")
-    Same(store:GetSettings().league, "Default", "default league")
-    NoChatSettings(db.settings, "fresh SavedVariables have no visible-chat configuration")
-    NoChatSettings(store:GetSettings(), "settings reader exposes no visible-chat options")
-    Same(store:GetSettings().hostName, "", "join target defaults empty")
-    Check(store:SaveSettings(OldChatSettings()), "old settings objects may still be saved")
-    NoChatSettings(db.settings, "old visible-chat values are not resaved")
-    for _, key in ipairs(REMOVED_CHAT_SETTINGS) do
-        for _, value in ipairs({ true, false, "UNKNOWN", "bad\n|channel", string.rep("x", 129), 1, math.huge, {} }) do
-            Check(store:SaveSettings({ [key] = value }), "retired setting values are ignored rather than validated")
-            NoChatSettings(db.settings, "retired values cannot become saved configuration")
-            NoChatSettings(store:GetSettings(), "retired values cannot reach gameplay settings")
-        end
-    end
-    Same(store:GetSettings().league, "Default", "ignored legacy chat writes preserve relevant settings")
-    for _, name in ipairs({
-        "",
-        "Quizhost",
-        "Quizhost-TestRealm",
-        "Quizhost-Area52",
-        "Quizhost-Quel'Thalas",
-        "Quizhost-Azjol-Nerub",
-        "Étoile-Hyjal",
-        "玩家-白银之手",
-    }) do
-        Check(store:SaveSettings({ hostName = name }), "plain character or realm-qualified join name accepts")
-        Same(store:GetSettings().hostName, name, "host name persists without rewriting")
-    end
-    local validHostName = store:GetSettings().hostName
-    for _, name in ipairs({
-        " ",
-        "Host Realm",
-        "Host|Realm",
-        "Host\nRealm",
-        "/invite",
-        "Host@Realm",
-        "-Realm",
-        "Host-",
-        "Host--Realm",
-        string.rep("a", 129),
-        false,
-        42,
-        {},
-    }) do
-        Check(not store:SaveSettings({ hostName = name }), "malformed join target rejects")
-    end
-    Same(store:GetSettings().hostName, validHostName, "invalid host names do not replace previous target")
-    Check(store:SaveSettings({ hostName = "", continuous = true }), "runtime-only mode may accompany saved settings")
-    Same(store:GetSettings().continuous, nil, "continuous flag does not become persistent configuration")
-    Same(db.settings.continuous, nil, "SavedVariables omit runtime-only continuous state")
+
+    local normalized = store:Normalize({ schemaVersion = 7, settings = { packId = "custom-pack" } })
+    Check(normalized ~= nil, "pure normalization accepts the current Quiz schema")
+    Same(store.db, db, "pure normalization does not replace the bound database")
+    Same(normalized.settings.packId, "custom-pack", "pure normalization retains pack selection")
+    store:Bind(normalized)
+    Same(store.db, normalized, "explicit binding installs normalized Quiz mode data")
+    Same(Quiz.PersonalScores.data, normalized.personalScores, "binding installs the mode-owned score subtree")
+
     local settings = store:GetSettings()
-    settings.league = "QuizLeague"
-    Same(store:GetSettings().league, "Default", "settings getter returns copy")
-    Check(store:SaveSettings(settings), "league settings save")
-    settings.league = "Changed"
-    Same(store:GetSettings().league, "QuizLeague", "saved settings are copied")
-    Check(store:SaveSettings({ league = "Default" }), "league can be restored independently")
-    Check(not store:SaveSettings({ league = "" }), "empty league rejected")
-    Check(not store:SaveSettings({ league = string.rep("x", 49) }), "oversized league rejected")
-    Check(not store:SaveSettings({ questionCount = 0 }), "zero questions rejected")
-    Check(not store:SaveSettings({ questionCount = 51 }), "too many questions rejected")
-    Check(store:SaveSettings({ duration = 9 }), "retired shorter duration option is ignored")
-    Same(store:GetSettings().duration, 15, "shorter saved duration cannot override the fixed clock")
-    Check(store:SaveSettings({ duration = 61 }), "retired longer duration option is ignored")
-    Same(store:GetSettings().duration, 15, "longer saved duration cannot override the fixed clock")
-    Check(not store:SaveSettings({ autoAdvance = "yes" }), "boolean setting rejects string")
-    Same(store:NextQuestionId(), 1, "first global question id")
-    Same(store:NextQuestionId(), 2, "question ids increase before any score")
+    settings.packId = "warcraft-lore"
+    Same(store:GetSettings().packId, "custom-pack", "settings getter returns a copy")
+    Check(store:SaveSettings(settings), "pack selection saves")
+    settings.packId = "changed"
+    Same(store:GetSettings().packId, "warcraft-lore", "saved settings are copied")
+    Check(not store:SaveSettings({ packId = false }), "non-string pack selection rejects")
+    Check(not store:SaveSettings({ packId = "" }), "empty pack selection rejects")
+    Check(not store:SaveSettings({ packId = string.rep("x", 97) }), "oversized pack selection rejects")
+    Check(store:SaveSettings(OldChatSettings()), "retired settings objects remain harmless input")
+    SameTable(store:GetSettings(), { packId = "warcraft-lore" }, "retired settings are never persisted")
 
-    local wrong = ClosedWrong(2)
-    Check(store:RecordRound("Guild", "PUBLIC", wrong), "final result persists")
-    Check(not store:RecordRound("Guild", "PUBLIC", wrong), "same result does not persist twice")
-    Same(store:GetStandings("Guild", "PUBLIC")[1].score, -0.9, "incorrect negative score persists")
-    wrong.answers[1].points = 3
-    wrong.answers[1].name = "Changed-Realm"
-    Same(store:GetStandings("Guild", "PUBLIC")[1].name, "Alice-Realm", "result input is copied")
-    Same(db.leagues.Guild.PUBLIC.history[1].answers[1].points, -0.9, "history input is copied")
-    Check(not store:RecordRound("Guild", "WHISPER", ClosedWrong(3)), "new whisper results are forbidden")
-    Check(not store:RecordRound("Guild", "LOCAL", ClosedWrong(3)), "new rehearsal results are forbidden")
-    Check(store:RecordRound("Other", "PUBLIC", ClosedWrong(4)), "league result persists separately")
-    Same(store:GetStandings("Guild", "PUBLIC")[1].score, -0.9, "rejected modes and other leagues do not mix")
-    Same(#store:GetStandings("Guild", "WHISPER"), 0, "rejected write does not create a whisper board")
-    Same(#store:GetStandings("Missing", "PUBLIC"), 0, "unplayed league is empty")
-    local exposedStandings = store:GetStandings("Guild", "PUBLIC")
-    exposedStandings[1].score = 999
-    Same(store:GetStandings("Guild", "PUBLIC")[1].score, -0.9, "standings getter returns copies")
-    Same(store:NextQuestionId(), 5, "recorded ids advance global counter")
-    local reloaded = store:Initialize(db)
-    Check(reloaded ~= db, "reload validates and copies saved state")
-    Same(reloaded.widgetPosition.x, 0.2, "saved widget horizontal position survives reload")
-    Same(reloaded.widgetPosition.y, 0.8, "saved widget vertical position survives reload")
-    db.widgetPosition.x = 0.9
-    Same(store:GetWidgetPosition().x, 0.2, "reload copies the saved position instead of sharing input")
-    Same(store:GetStandings("Guild", "PUBLIC")[1].score, -0.9, "negative totals survive reload")
-    Same(store:NextQuestionId(), 6, "global ids survive reload")
-    Check(not store:RecordRound("Guild", "PUBLIC", ClosedWrong(2)), "reload preserves replay protection")
-    db.leagues.Guild.PUBLIC.players["Player-1-A"].score = 900
-    Same(store:GetStandings("Guild", "PUBLIC")[1].score, -0.9, "saved input is copied")
-    local renamed = ClosedWrong(7, "Renamed-Realm")
-    Check(store:RecordRound("Guild", "PUBLIC", renamed), "GUID maintains identity after name change")
-    Same(store:GetStandings("Guild", "PUBLIC")[1].score, -1.8, "same GUID aggregates signed scores")
-    Same(store:GetStandings("Guild", "PUBLIC")[1].incorrect, 2, "negative-point wrong answers count in statistics")
-    Same(store:GetStandings("Guild", "PUBLIC")[1].name, "Renamed-Realm", "display name updates")
-    Same(#store:GetStandings("Guild", "PUBLIC"), 1, "rename does not duplicate player")
-
-    local preserved = store.db
-    local future = { schemaVersion = 7, important = { value = "keep" } }
-    local futureDb, futureError = store:Initialize(future)
-    Same(futureDb, nil, "future database rejected")
-    Same(futureError, "unsupported_database_version", "future rejection is explicit")
-    Same(future.important.value, "keep", "future database not overwritten")
-    Same(store.db, preserved, "failed initialization leaves previous state untouched")
-    Check(
-        store:Initialize({ schemaVersion = 3, settings = { autoAdvance = "yes" } }) == nil,
-        "corrupt retained progression setting rejects on load"
-    )
-    Check(
-        store:Initialize({ schemaVersion = 3, settings = { hostName = "Host Realm" } }) == nil,
-        "corrupt host target rejects on load"
-    )
-    Same(store.db, preserved, "corrupt new settings preserve the existing database")
-    Check(store:Initialize({ schemaVersion = 2, settings = { league = "" } }) == nil, "corrupt league rejected on load")
-    Check(
-        store:Initialize({ schemaVersion = 2, settings = { questionCount = 51 } }) == nil,
-        "schema-two invalid retained finite-game settings reject"
-    )
-    Check(
-        store:Initialize({ schemaVersion = 2, settings = { packId = false } }) == nil,
-        "schema-two malformed pack selection rejects"
-    )
-    Check(store:Initialize({ schemaVersion = 2, settings = false }) == nil, "false settings do not silently default")
-    Check(
-        store:Initialize({ schemaVersion = 2, nextQuestionId = false }) == nil,
-        "false counter does not silently reset"
-    )
-    Check(store:Initialize({ schemaVersion = 2, leagues = false }) == nil, "false standings do not silently reset")
-    Check(store:Initialize("bad") == nil, "non-table database rejected")
-    local invalidResult = ClosedWrong(8)
-    invalidResult.answers[2] = invalidResult.answers[1]
-    Check(not store:RecordRound("Guild", "PUBLIC", invalidResult), "duplicate player in result rejected atomically")
-    Same(store:GetStandings("Guild", "PUBLIC")[1].score, -1.8, "bad result leaves totals untouched")
-
-    db = store:Initialize(nil)
-    for id = 1, 60 do
-        Check(store:RecordRound("History", "PUBLIC", ClosedWrong(id)), "history round accepted")
-    end
-    Same(#db.leagues.History.PUBLIC.history, 50, "recent history is bounded")
-    Same(db.leagues.History.PUBLIC.history[1].id, 11, "oldest history entries evicted")
-    Check(not store:RecordRound("History", "PUBLIC", ClosedWrong(1)), "evicted result still cannot be replayed")
-    Same(store:GetStandings("History", "PUBLIC")[1].score, -54, "history eviction preserves signed aggregate totals")
-    db.nextQuestionId = 1
-    Check(store:Initialize(db) ~= nil, "load saved boards")
-    Same(store:NextQuestionId(), 61, "board high-watermark prevents counter reuse")
-    Check(not store:RecordRound("History", "PUBLIC", ClosedWrong(1)), "durable dedup survives bounded history reload")
-    Same(store:GetStandings("History", "PUBLIC")[1].answers, 60, "answer counts survive reload")
-
-    local preciseDb = store:Initialize(nil)
-    for id = 1, 1000 do
-        Check(store:RecordRound("Precise", "PUBLIC", ClosedCorrect(id, 14)), "one-and-a-tenth answer persists")
-        Same(store:GetStandings("Precise", "PUBLIC")[1].score, id * 11 / 10, "saved totals accumulate exact tenths")
-    end
-    Same(preciseDb.leagues.Precise.PUBLIC.history[50].answers[1].points, 1.1, "history keeps decimal answer points")
-    Check(store:Initialize(preciseDb) ~= nil, "decimal score boards validate on reload")
-    Same(store:GetStandings("Precise", "PUBLIC")[1].score, 1100, "many decimal awards survive reload without drift")
-    Same(store:GetStandings("Precise", "PUBLIC")[1].correct, 1000, "correct count is not confused with scaled points")
-    local fractional = ClosedCorrect(1001, 10.25)
-    Check(store:RecordRound("Precise", "PUBLIC", fractional), "fractional final-answer timing persists")
-    Same(store:GetStandings("Precise", "PUBLIC")[1].score, 1101.4, "fractional timestamp uses whole remaining seconds")
-    Same(store.db.leagues.Precise.PUBLIC.history[50].answers[1].elapsed, 10.25, "history keeps precise accepted time")
-    local precisePreserved = store.db
-    for _, points in ipairs({ -50, -1, 0, 1, 1.91, 2, 100, 110, 120, math.huge, 0 / 0, "1.9", false }) do
-        local bad = ClosedCorrect(1002, 10.25)
-        bad.answers[1].points = points
-        Check(not store:RecordRound("Precise", "PUBLIC", bad), "incorrect computed points cannot enter current history")
-    end
-    local withoutTiming = ClosedCorrect(1002, 10.25)
-    withoutTiming.duration = nil
-    Check(
-        not store:RecordRound("Precise", "PUBLIC", withoutTiming),
-        "new scoring history requires its original duration"
-    )
-    local stalePenalty = ClosedWrong(1002)
-    stalePenalty.answers[1].points = -50
-    Check(not store:RecordRound("Precise", "PUBLIC", stalePenalty), "old wrong-answer penalty is not valid new scoring")
-    Same(store:GetStandings("Precise", "PUBLIC")[1].score, 1101.4, "invalid decimal results cannot mutate totals")
-    Same(store.db, precisePreserved, "invalid records preserve the complete current database")
-    local singleDecimal = ClosedCorrect(1002, 13)
-    Check(
-        store:RecordRound("Precise", "PUBLIC", singleDecimal),
-        "correct result remains writable after rejected points"
-    )
-    Same(store:GetStandings("Precise", "PUBLIC")[1].score, 1102.6, "several decimal parts accumulate exactly")
-
-    local corruptScores = { -1, -50, 0.01, 1.11, math.huge, 0 / 0, "1.1", false }
-    for _, score in ipairs(corruptScores) do
-        local invalidDb = {
-            schemaVersion = 4,
-            leagues = {
-                Invalid = {
-                    PUBLIC = {
-                        players = {
-                            Bad = { name = "Bad-Realm", score = score, correct = 1, incorrect = 0, answers = 1 },
-                        },
-                    },
-                },
-            },
-        }
-        Check(
-            store:Initialize(invalidDb) == nil,
-            "schema-four saved board rejects nonfinite, negative, or non-tenth totals"
-        )
-        Same(store.db, precisePreserved, "bad persisted score never replaces valid scores")
-    end
-    for _, position in ipairs({
-        false,
-        "middle",
-        {},
-        { x = 0.5 },
-        { y = 0.5 },
-        { x = -0.1, y = 0.5 },
-        { x = 0.5, y = math.huge },
-    }) do
-        local invalidDb = { schemaVersion = 4, widgetPosition = position }
-        local loaded, reason = store:Initialize(invalidDb)
-        Same(loaded, nil, "invalid persisted position rejects")
-        Same(reason, "invalid_widget_position", "invalid persisted position is explicit")
-        Same(store.db, precisePreserved, "invalid position cannot discard score data")
+    local position = store:GetWidgetPosition()
+    SameTable(position, { x = 0.5, y = 0.65 }, "widget receives normalized position defaults")
+    position.x = 0
+    Same(store:GetWidgetPosition().x, 0.5, "position getter does not expose the saved table")
+    Check(store:SaveWidgetPosition(0.25, 0.75), "normalized widget position saves")
+    SameTable(store:GetWidgetPosition(), { x = 0.25, y = 0.75 }, "saved position round-trips")
+    for _, invalid in ipairs({ -0.01, 1.01, math.huge, -math.huge, 0 / 0, false, "0.5", {} }) do
+        local accepted, reason = store:SaveWidgetPosition(invalid, 0.5)
+        Check(not accepted, "invalid horizontal position rejects")
+        Same(reason, "invalid_widget_position", "position validation has a stable failure code")
     end
 
-    local function LegacyBoard(id, correct)
-        local entry = ClosedWrong(id)
-        entry.duration, entry.scoringVersion = 20, nil
-        entry.answers[1].points = -50
-        if correct then
-            entry.correctCount = 1
-            entry.answers[1].choiceIndex = 1
-            entry.answers[1].correct = true
-            entry.answers[1].points = 120
-        end
-        return {
-            lastRoundId = id,
-            players = {
-                ["Player-1-A"] = {
-                    name = "Alice-Realm",
-                    score = correct and 120 or -50,
-                    correct = correct and 1 or 0,
-                    incorrect = correct and 0 or 1,
-                    answers = 1,
-                },
-            },
-            history = { entry },
-        }
-    end
+    SameTable(store:GetWidgetSettings(), { scale = 100, font = "" }, "widget appearance receives defaults")
+    Check(store:SaveWidgetSettings({ scale = 125, font = "Selected Font" }), "widget appearance saves")
+    SameTable(
+        store:GetWidgetSettings(),
+        { scale = 125, font = "Selected Font" },
+        "widget appearance round-trips independently"
+    )
+    Check(not store:SaveWidgetSettings({ scale = 126 }), "off-step widget scale rejects")
+    Check(not store:SaveWidgetSettings({ font = string.rep("x", 129) }), "oversized widget font rejects")
+
+    Same(store:GetSoundVolume(), Quiz.SOUND_VOLUME_DEFAULT, "sound receives its mode default")
+    Check(store:SaveSoundVolume(50), "supported sound volume saves")
+    Same(store:GetSoundVolume(), 50, "sound volume round-trips")
+    Check(not store:SaveSoundVolume(55), "off-step sound volume rejects")
+
     local legacy = {
         schemaVersion = 1,
         settings = {
-            league = "Legacy",
-            channel = "GUILD",
-            customChannel = "",
-            channelPassword = "keep-password",
-            answerMode = "WHISPER",
             packId = "test",
+            league = "Retired",
+            hostName = "RetiredHost-Realm",
             questionCount = 17,
-            duration = 35,
             autoAdvance = true,
         },
         nextQuestionId = 40,
-        leagues = {
-            Legacy = { PUBLIC = LegacyBoard(20, false), WHISPER = LegacyBoard(25, true) },
-            Other = { PUBLIC = LegacyBoard(30, false) },
-        },
+        leagues = {},
     }
-    local migrated, migrationError = store:Initialize(legacy)
+    local migrated, migrationError = store:Normalize(legacy)
     Check(migrated ~= nil, migrationError)
-    Same(migrated.schemaVersion, 6, "legacy database archives old scoring alongside personal pack totals")
-    Same(migrated.nextQuestionId, 40, "migration preserves a counter ahead of scored rounds")
-    NoChatSettings(migrated.settings, "legacy migration discards visible-chat settings and password")
-    Same(migrated.settings.league, "Legacy", "migration preserves selected league")
-    Same(migrated.settings.packId, "test", "migration preserves selected pack")
-    Same(migrated.settings.questionCount, 17, "migration preserves game length")
-    Same(migrated.settings.duration, 15, "migration normalizes future rounds to the fixed answer duration")
-    Same(migrated.settings.autoAdvance, true, "migration preserves progression setting")
-    Same(migrated.settings.hostName, "", "old setup receives an empty join target")
-    Same(migrated.widgetPosition.x, 0.5, "migration installs horizontal default position")
-    Same(migrated.widgetPosition.y, 0.65, "migration installs vertical default position")
-    Same(store:GetLegacyStandings("Legacy", "PUBLIC")[1].score, -50, "migration archives negative public totals")
-    Same(store:GetLegacyStandings("Legacy", "WHISPER")[1].score, 120, "migration archives positive whisper totals")
-    Same(store:GetLegacyStandings("Other", "PUBLIC")[1].score, -50, "migration archives other leagues")
-    Same(next(migrated.leagues), nil, "old-scoring migration starts with empty new-scale boards")
-    Same(#store:GetStandings("Legacy", "PUBLIC"), 0, "new standings never expose old-scale public points")
-    Same(#store:GetStandings("Legacy", "WHISPER"), 0, "new standings never expose old-scale whisper points")
-    Same(migrated.legacyLeagues.Legacy.PUBLIC.lastRoundId, 20, "migration preserves public dedup watermark")
-    Same(migrated.legacyLeagues.Legacy.WHISPER.lastRoundId, 25, "migration preserves archived dedup watermark")
-    Same(migrated.legacyLeagues.Legacy.WHISPER.history[1].answers[1].points, 120, "archived answer history survives")
-    Same(migrated.legacyLeagues.Legacy.PUBLIC.history[1].id, 20, "public answer history survives")
-    Same(legacy.schemaVersion, 1, "migration leaves input schema untouched")
-    Same(legacy.settings.channel, "GUILD", "migration leaves input settings untouched")
-    Same(legacy.settings.answerMode, "WHISPER", "migration leaves original answer mode untouched")
-    Same(legacy.settings.customChannel, "", "migration leaves original blank name untouched")
-    Same(legacy.settings.channelPassword, "keep-password", "normalization does not modify the input password in place")
-    Check(not store:RecordRound("Legacy", "WHISPER", ClosedWrong(40)), "archived whisper board is read-only")
-    Same(migrated.nextQuestionId, 40, "rejected archive write does not advance counter")
-    Same(#migrated.legacyLeagues.Legacy.WHISPER.history, 1, "rejected archive write does not append history")
-    Check(not store:RecordRound("Legacy", "PUBLIC", ClosedWrong(20)), "migration retains public replay protection")
-    Check(store:RecordRound("Legacy", "PUBLIC", ClosedWrong(40)), "public scoring continues after migration")
-    Same(store:GetStandings("Legacy", "PUBLIC")[1].score, -0.9, "new points start a separate signed scoring board")
-    Same(store:GetLegacyStandings("Legacy", "PUBLIC")[1].score, -50, "new points never change legacy public totals")
-    Same(store:GetLegacyStandings("Legacy", "WHISPER")[1].score, 120, "new public points never mix with archive")
-    legacy.leagues.Legacy.WHISPER.players["Player-1-A"].score = 900
-    Same(store:GetLegacyStandings("Legacy", "WHISPER")[1].score, 120, "archived players are copied during migration")
-    local secondLoad = store:Initialize(migrated)
-    Check(secondLoad ~= nil, "migrated database reloads normally")
-    Same(store:GetLegacyStandings("Legacy", "WHISPER")[1].score, 120, "schema-five reload retains archived boards")
-    Same(store:GetStandings("Legacy", "PUBLIC")[1].score, -0.9, "schema-five reload retains new public totals")
-    Same(secondLoad.nextQuestionId, 41, "schema-five reload retains advanced counter")
-    Same(#secondLoad.leagues.Legacy.PUBLIC.history, 1, "schema-five reload keeps only new history on the new board")
-    Same(#secondLoad.legacyLeagues.Legacy.PUBLIC.history, 1, "schema-five reload keeps old history separate")
+    Same(migrated.schemaVersion, 7, "legacy Quiz data reaches the current mode schema")
+    SameTable(migrated.settings, { packId = "test" }, "migration retains only active Quiz settings")
+    Same(migrated.nextQuestionId, 40, "migration preserves the question allocator")
+    Same(legacy.schemaVersion, 1, "normalization leaves legacy input untouched")
 
-    local retiredVariants = { OldChatSettings() }
-    for _, value in ipairs({ true, false, "UNKNOWN", "bad\n|channel", string.rep("x", 129), 42, math.huge, {} }) do
-        local fields = {}
-        for _, key in ipairs(REMOVED_CHAT_SETTINGS) do
-            fields[key] = value
-        end
-        retiredVariants[#retiredVariants + 1] = fields
+    for version = 1, 7 do
+        local loaded, reason = store:Normalize({ schemaVersion = version })
+        Check(loaded ~= nil, "every supported Quiz schema normalizes: " .. tostring(reason))
+        Same(loaded.schemaVersion, 7, "every supported Quiz schema reaches the current version")
+        SameTable(loaded.settings, { packId = "all" }, "missing settings receive only the pack default")
     end
-    for version = 1, 6 do
-        for _, retiredFields in ipairs(retiredVariants) do
-            local oldSettings = Settings(17)
-            oldSettings.league, oldSettings.packId = "Retained", "test"
-            oldSettings.duration, oldSettings.autoAdvance, oldSettings.hostName = 60, true, "SavedHost-TestRealm"
-            for key, value in pairs(retiredFields) do
-                oldSettings[key] = value
-            end
-            local archives = { Retained = { PUBLIC = LegacyBoard(20, false), WHISPER = LegacyBoard(25, true) } }
-            local currentBoards = {
-                Retained = {
-                    PUBLIC = {
-                        lastRoundId = 30,
-                        players = {
-                            ["Player-1-A"] = {
-                                name = "Alice-Realm",
-                                score = 2.5,
-                                correct = 1,
-                                incorrect = 0,
-                                answers = 1,
-                            },
-                        },
-                        history = { PreviousRound(30, true, 5, 20, true) },
-                    },
-                },
-            }
-            local old = {
-                schemaVersion = version,
-                settings = oldSettings,
-                nextQuestionId = 40,
-                widgetPosition = { x = 0.23, y = 0.74 },
-                leagues = version >= 4 and currentBoards or archives,
-                legacyLeagues = version >= 4 and archives or nil,
-            }
-            local converted, reason = store:Initialize(old)
-            Check(converted ~= nil, reason)
-            Same(converted.schemaVersion, 6, "every supported input reaches the versioned signed-score schema")
-            NoChatSettings(converted.settings, "every recognized schema drops retired visible-chat fields")
-            NoChatSettings(store:GetSettings(), "every recognized schema exposes only retained settings")
-            Same(converted.settings.league, "Retained", "chat removal preserves selected league")
-            Same(converted.settings.packId, "test", "chat removal preserves selected question pack")
-            Same(converted.settings.duration, 15, "old bridge never revives the variable answer window")
-            Same(converted.settings.questionCount, 17, "chat removal leaves unrelated finite-game data intact")
-            Same(converted.settings.autoAdvance, true, "chat removal leaves unrelated progression data intact")
-            Same(converted.settings.hostName, "SavedHost-TestRealm", "chat removal leaves old join preference intact")
-            Same(converted.nextQuestionId, 40, "chat removal does not reset the question allocator")
-            SameTable(converted.widgetPosition, old.widgetPosition, "chat removal preserves widget position")
-            SameTable(converted.legacyLeagues, archives, "chat removal preserves all public and whisper archive data")
-            SameTable(converted.leagues, version >= 4 and currentBoards or {}, "chat removal preserves current boards")
-            for key, value in pairs(retiredFields) do
-                Same(oldSettings[key], value, "normalization does not mutate retired input values")
-            end
-            Same(old.schemaVersion, version, "normalization never rewrites the supplied database in place")
-            Check(store:SaveSettings(oldSettings), "old configured settings can be saved without obsolete validation")
-            NoChatSettings(converted.settings, "old active bridge and password cannot return during saving")
-            local normalizedAgain = store:Initialize(converted)
-            Check(normalizedAgain ~= nil, "cleaned settings reload normally")
-            SameTable(normalizedAgain.settings, converted.settings, "chat removal is idempotent across reloads")
-            NoChatSettings(normalizedAgain.settings, "reloading does not regenerate deleted chat defaults")
-            SameTable(normalizedAgain.legacyLeagues, archives, "reload keeps complete old public and whisper archives")
-            SameTable(
-                normalizedAgain.leagues,
-                version >= 4 and currentBoards or {},
-                "reload keeps current scores intact"
-            )
-            SameTable(normalizedAgain.widgetPosition, old.widgetPosition, "reload keeps the saved widget position")
-        end
-        Check(store:Initialize({ schemaVersion = version }) ~= nil, "missing settings normalize for every old schema")
-        NoChatSettings(store:GetSettings(), "missing settings never recreate retired defaults")
-        Check(store:Initialize({ schemaVersion = version, settings = false }) == nil, "non-table settings still reject")
-    end
-    preserved = store.db
-    Check(store:Initialize(future) == nil, "future schemas still reject after migration")
-    Same(store.db, preserved, "future rejection does not replace migrated data")
-    Same(future.schemaVersion, 7, "future schema is never rewritten")
+    local preserved = store.db
+    local future = { schemaVersion = 8, important = { value = "keep" } }
+    local rejected, futureError = store:Initialize(future)
+    Same(rejected, nil, "future Quiz schemas reject")
+    Same(futureError, "unsupported_database_version", "future Quiz schemas have a stable failure code")
+    Same(store.db, preserved, "future rejection does not replace bound mode data")
+    Same(future.schemaVersion, 8, "future input is never rewritten")
 
-    local legacyTwo = {
-        schemaVersion = 2,
-        settings = {
-            league = "Legacy",
-            channel = "CHANNEL",
-            customChannel = "KeepThisChannel",
-            answerMode = "PUBLIC",
-            duration = 45,
-            questionCount = 11,
-            autoAdvance = true,
-        },
-        nextQuestionId = 70,
-        leagues = { Legacy = { PUBLIC = LegacyBoard(60, false), WHISPER = LegacyBoard(65, true) } },
-    }
-    local migratedTwo = store:Initialize(legacyTwo)
-    Check(migratedTwo ~= nil, "schema-two database migrates")
-    Same(migratedTwo.schemaVersion, 6, "schema-two migration reaches current schema")
-    NoChatSettings(migratedTwo.settings, "schema-two migration removes obsolete visible-chat configuration")
-    Same(migratedTwo.settings.hostName, "", "schema-two migration adds empty join target")
-    Same(migratedTwo.settings.duration, 15, "schema-two migration normalizes future timing")
-    Same(migratedTwo.settings.questionCount, 11, "schema-two migration retains legacy finite-game setting")
-    Same(migratedTwo.settings.autoAdvance, true, "schema-two migration retains legacy progression setting")
-    Same(migratedTwo.nextQuestionId, 70, "schema-two migration preserves global question counter")
-    Same(
-        store:GetLegacyStandings("Legacy", "PUBLIC")[1].score,
-        -50,
-        "schema-two migration preserves signed public totals"
-    )
-    Same(store:GetLegacyStandings("Legacy", "WHISPER")[1].score, 120, "schema-two migration preserves whisper archives")
-    Same(migratedTwo.legacyLeagues.Legacy.PUBLIC.lastRoundId, 60, "schema-two migration preserves replay watermark")
-    Same(migratedTwo.legacyLeagues.Legacy.WHISPER.history[1].id, 65, "schema-two migration preserves archived history")
-    Same(legacyTwo.schemaVersion, 2, "schema-two migration leaves original input untouched")
-    Same(legacyTwo.settings.bridgeChat, nil, "migration does not modify old settings in place")
-    Check(
-        store:SaveSettings({ bridgeChat = true, hostName = "Quizhost-Area52" }),
-        "widget settings save while retired bridge fields are ignored"
-    )
-    local withWidgets = store:Initialize(migratedTwo)
-    Check(withWidgets ~= nil, "widget-capable database reloads")
-    NoChatSettings(withWidgets.settings, "retired bridge option cannot survive reload")
-    Same(withWidgets.settings.hostName, "Quizhost-Area52", "join target survives reload")
-    local highNumber = ClosedWrong(70)
-    highNumber.number = 9007199254740991
-    highNumber.cycle = 4
-    Check(store:RecordRound("Legacy", "PUBLIC", highNumber), "history permits a safe-integer continuous round number")
-    Same(withWidgets.leagues.Legacy.PUBLIC.history[1].cycle, 4, "new history retains continuous cycle")
-    for _, number in ipairs({ 0, -1, 0.5, math.huge, 9007199254740992 }) do
-        local invalidNumber = ClosedWrong(71)
-        invalidNumber.number = number
-        Check(not store:RecordRound("Legacy", "PUBLIC", invalidNumber), "unsafe history round number rejects")
+    for _, retiredId in ipairs({ "warcraft_basics", "warcraft-basics" }) do
+        local upgraded = store:Normalize({ schemaVersion = 7, settings = { packId = retiredId } })
+        Same(upgraded.settings.packId, "warcraft-lore", "retired built-in selection resolves to its replacement")
     end
-    local invalidCycle = ClosedWrong(71)
-    invalidCycle.cycle = 0
-    Check(not store:RecordRound("Legacy", "PUBLIC", invalidCycle), "invalid cycle rejects without scoring")
-    Check(store:Initialize(withWidgets) ~= nil, "extended continuous history reloads")
-    Same(store:GetStandings("Legacy", "PUBLIC")[1].score, -0.9, "invalid continuous records never change scores")
-    preserved = store.db
-    Check(store:Initialize(future) == nil, "future schema protection remains after widget migration")
-    Same(store.db, preserved, "future input does not overwrite scores or widget settings")
-
-    local oldWithoutDuration = LegacyBoard(95, true)
-    oldWithoutDuration.history[1].duration = nil
-    oldWithoutDuration.history[1].answers[1].elapsed = 250
-    oldWithoutDuration.history[1].answers[1].points = 110
-    oldWithoutDuration.players["Player-1-A"].score = 110
-    local legacyThree = {
-        schemaVersion = 3,
-        settings = { bridgeChat = true, hostName = "SavedHost-TestRealm", duration = 30 },
-        nextQuestionId = 1,
-        leagues = {
-            Before = { PUBLIC = LegacyBoard(81, false), WHISPER = oldWithoutDuration },
-        },
-    }
-    legacyThree.leagues.Before.PUBLIC.history[1].cycle = 7
-    local migratedThree = store:Initialize(legacyThree)
-    Check(migratedThree ~= nil, "schema-three widget installation migrates directly to new scoring")
-    Same(migratedThree.schemaVersion, 6, "widget migration reaches current schema")
-    Same(migratedThree.nextQuestionId, 96, "archived high-watermark repairs an outdated question counter")
-    NoChatSettings(migratedThree.settings, "migration discards an enabled user bridge preference")
-    Same(
-        migratedThree.settings.hostName,
-        "SavedHost-TestRealm",
-        "migration preserves historical explicit-join preference"
-    )
-    Same(migratedThree.settings.duration, 15, "migration normalizes future timing without rescoring history")
-    Same(migratedThree.legacyLeagues.Before.PUBLIC.history[1].cycle, 7, "old continuous cycle IDs survive unchanged")
-    Same(migratedThree.legacyLeagues.Before.WHISPER.history[1].duration, nil, "missing legacy duration is not invented")
-    Same(
-        migratedThree.legacyLeagues.Before.WHISPER.history[1].answers[1].elapsed,
-        250,
-        "timing-less legacy elapsed stays intact"
-    )
-    Same(
-        migratedThree.legacyLeagues.Before.WHISPER.history[1].answers[1].points,
-        110,
-        "legacy history is not recalculated"
-    )
-    Same(store:GetLegacyStandings("Before", "WHISPER")[1].score, 110, "historical totals survive missing timing data")
-    Same(store:GetLegacyStandings("Before", "PUBLIC")[1].score, -50, "negative legacy total is preserved, not floored")
-    Same(#store:GetStandings("Before", "PUBLIC"), 0, "schema-three migration also starts new scores from empty")
-    local archiveView = store:GetLegacyStandings("Before", "PUBLIC")
-    archiveView[1].score = 5
-    Same(store:GetLegacyStandings("Before", "PUBLIC")[1].score, -50, "archive accessor returns copies")
-    Check(
-        store:RecordRound("Before", "PUBLIC", ClosedCorrect(96, 5)),
-        "new-scale points record beside old archived league"
-    )
-    Same(store:GetStandings("Before", "PUBLIC")[1].score, 2, "first new correct answer starts at its own small scale")
-    Same(
-        store:GetLegacyStandings("Before", "PUBLIC")[1].score,
-        -50,
-        "new-scale correct points cannot change archived penalties"
-    )
-    Check(store:SaveWidgetPosition(0.33, 0.67), "new position writes alongside migrated scores")
-    Check(store:Initialize(migratedThree) ~= nil, "mixed old archives and new scores reload atomically")
-    Same(store:GetStandings("Before", "PUBLIC")[1].score, 2, "new decimal totals survive migration reload")
-    Same(store:GetLegacyStandings("Before", "PUBLIC")[1].score, -50, "old integer totals survive migration reload")
-    Same(store:GetWidgetPosition().x, 0.33, "migrated database retains moved widget center")
-    Same(legacyThree.nextQuestionId, 1, "migration does not repair the original input in place")
-    Same(legacyThree.schemaVersion, 3, "migration does not rewrite original schema in place")
-    local retainedArchive = store.db
-    for _, points in ipairs({ 1, 2.9, 0, -50 }) do
-        local invalidLegacy = { schemaVersion = 3, leagues = { Invalid = { PUBLIC = LegacyBoard(5, true) } } }
-        invalidLegacy.leagues.Invalid.PUBLIC.history[1].answers[1].points = points
-        Check(store:Initialize(invalidLegacy) == nil, "legacy correct answers validate using old point scale only")
-        Same(store.db, retainedArchive, "invalid old history cannot replace current data")
-    end
-    local wrongOldBand = { schemaVersion = 3, leagues = { Invalid = { PUBLIC = LegacyBoard(5, true) } } }
-    wrongOldBand.leagues.Invalid.PUBLIC.history[1].answers[1].points = 100
-    Check(store:Initialize(wrongOldBand) == nil, "legacy known-duration history validates the original timing bands")
-    Same(store.db, retainedArchive, "bad old timing leaves the current database untouched")
-    local longArchive = LegacyBoard(60, false)
-    longArchive.players["Player-1-A"].score = -3000
-    longArchive.players["Player-1-A"].incorrect = 60
-    longArchive.players["Player-1-A"].answers = 60
-    longArchive.history = {}
-    for id = 1, 60 do
-        longArchive.history[id] = LegacyBoard(id, false).history[1]
-    end
-    local fullArchive = store:Initialize({ schemaVersion = 3, leagues = { All = { PUBLIC = longArchive } } })
-    Check(fullArchive ~= nil, "legacy archive with more than the live history window is valid")
-    Same(#fullArchive.legacyLeagues.All.PUBLIC.history, 60, "archiving never prunes supplied legacy history")
-    Same(fullArchive.legacyLeagues.All.PUBLIC.history[1].id, 1, "oldest supplied legacy ID stays archived")
-    Same(fullArchive.legacyLeagues.All.PUBLIC.history[60].id, 60, "latest supplied legacy ID stays archived")
-    Same(store:GetLegacyStandings("All", "PUBLIC")[1].score, -3000, "full negative legacy aggregate is unchanged")
-    Same(store:NextQuestionId(), 61, "legacy high-watermark reserves every historical question ID")
-    Check(store:Initialize(fullArchive) ~= nil, "full archive survives subsequent schema-five validation")
-    Same(#store.db.legacyLeagues.All.PUBLIC.history, 60, "reload does not trim legacy history either")
-
-    local oldTwenty = PreviousRound(1, true, 5, 20)
-    local oldSixty = PreviousRound(2, true, 5, 60)
-    local oldWrong = PreviousRound(3, false, 0, 10)
-    local savedVariableClock = {
-        schemaVersion = 4,
-        settings = { duration = 60 },
-        leagues = {
-            Existing = {
-                PUBLIC = {
-                    lastRoundId = 3,
-                    players = {
-                        ["Player-1-A"] = { name = "Alice-Realm", score = 9, correct = 2, incorrect = 1, answers = 3 },
-                    },
-                    history = { oldTwenty, oldSixty, oldWrong },
-                },
-            },
-        },
-    }
-    local fixedClockDb = store:Initialize(savedVariableClock)
-    Check(fixedClockDb ~= nil, "existing decimal scores with longer historical windows remain valid")
-    Same(fixedClockDb.settings.duration, 15, "loading schema four normalizes only future answer timing")
-    Same(savedVariableClock.settings.duration, 60, "normalization does not modify supplied SavedVariables in place")
-    Same(fixedClockDb.schemaVersion, 6, "old decimal history migrates to versioned scoring without recalculation")
-    Same(store:GetStandings("Existing", "PUBLIC")[1].score, 9, "existing decimal totals are not rescaled")
-    local existingHistory = fixedClockDb.leagues.Existing.PUBLIC.history
-    Same(existingHistory[1].duration, 20, "twenty-second historical windows remain intact")
-    Same(existingHistory[1].answers[1].points, 2.5, "twenty-second historical points remain intact")
-    Same(existingHistory[2].duration, 60, "sixty-second historical windows remain intact")
-    Same(existingHistory[2].answers[1].points, 6.5, "sixty-second historical points remain intact")
-    Same(existingHistory[3].duration, 10, "the previous fixed ten-second window remains intact")
-    Same(existingHistory[3].answers[1].points, 0, "old incorrect answers remain zero instead of acquiring a penalty")
-    for index = 1, 3 do
-        Same(existingHistory[index].scoringVersion, 1, "old decimal history is tagged with its original rules")
-        Same(
-            savedVariableClock.leagues.Existing.PUBLIC.history[index].scoringVersion,
-            nil,
-            "version tags copy without mutating old input"
-        )
-    end
-    fixedClockDb.settings.duration = 60
-    Same(store:GetSettings().duration, 15, "configuration readers cannot revive a mutated deprecated duration")
-    Check(store:SaveSettings({ duration = 20 }), "saving an old settings object remains compatible")
-    Same(fixedClockDb.settings.duration, 15, "settings save restores the internal fixed value")
-    local continuedGame = Quiz.Game.New(store:GetSettings(), Questions(1), KeepOrder)
-    local continuedRound = Open(continuedGame, store:NextQuestionId(), 0)
-    Check(
-        continuedGame:Submit("Player-1-A", "Alice-Realm", continuedRound.id, continuedRound.correctIndex, 0),
-        "existing scorer can play a new fixed-window round"
-    )
-    local continuedResult = continuedGame:CloseQuestion(15)
-    Same(continuedResult.scoringVersion, 2, "new results identify the signed-penalty scoring version")
-    Same(
-        continuedResult.answers[1].points,
-        2.5,
-        "new fixed rounds have a two-and-a-half-point maximum beside old history"
-    )
-    Check(
-        store:RecordRound("Existing", "PUBLIC", continuedResult),
-        "new fixed round appends without touching old scores"
-    )
-    Same(store:GetStandings("Existing", "PUBLIC")[1].score, 11.5, "new points accumulate on existing totals unchanged")
-    local continuedWrong = ClosedWrong(store:NextQuestionId())
-    Check(
-        store:RecordRound("Existing", "PUBLIC", continuedWrong),
-        "new penalties append beside historical zero-point mistakes"
-    )
-    Same(store:GetStandings("Existing", "PUBLIC")[1].score, 10.6, "only the new incorrect answer deducts points")
-    Check(store:Initialize(fixedClockDb) ~= nil, "mixed historical and fixed windows survive reload")
-    Same(store.db.leagues.Existing.PUBLIC.history[2].duration, 60, "later reload still preserves historical duration")
-    Same(
-        store.db.leagues.Existing.PUBLIC.history[3].answers[1].points,
-        0,
-        "later reload never retroactively penalizes old mistakes"
-    )
-    Same(store.db.leagues.Existing.PUBLIC.history[4].duration, 15, "later reload preserves new fixed duration")
-    Same(
-        store.db.leagues.Existing.PUBLIC.history[4].scoringVersion,
-        2,
-        "later reload preserves new correct scoring version"
-    )
-    Same(
-        store.db.leagues.Existing.PUBLIC.history[5].scoringVersion,
-        2,
-        "later reload preserves new penalty scoring version"
-    )
-    Same(store.db.leagues.Existing.PUBLIC.history[5].answers[1].points, -0.9, "later reload preserves the new penalty")
-    Same(store:GetStandings("Existing", "PUBLIC")[1].score, 10.6, "mixed-version aggregate survives reload unchanged")
-    Check(
-        not store:RecordRound("Existing", "PUBLIC", continuedWrong),
-        "new penalties retain exactly-once persistence after migration"
-    )
-
-    local mixedPreserved = store.db
-    for _, version in ipairs({ 0, 1, 3, 4, -1, 1.5, "2", false, {}, math.huge, 0 / 0 }) do
-        local bad = ClosedWrong(store.db.nextQuestionId)
-        bad.scoringVersion = version
-        Check(not store:RecordRound("Existing", "PUBLIC", bad), "new records require exactly scoring version two")
-        Same(store.db, mixedPreserved, "unknown new scoring versions cannot replace the current database")
-        Same(store:GetStandings("Existing", "PUBLIC")[1].score, 10.6, "rejected scoring versions cannot deduct points")
-    end
-    local unversioned = ClosedWrong(store.db.nextQuestionId)
-    unversioned.scoringVersion = nil
-    Check(not store:RecordRound("Existing", "PUBLIC", unversioned), "new records cannot omit their scoring version")
-    for _, duration in ipairs({ 10, 20, 60, 0, 15.5, "15", false }) do
-        local bad = ClosedWrong(store.db.nextQuestionId)
-        bad.duration = duration
-        Check(not store:RecordRound("Existing", "PUBLIC", bad), "new result duration must be the fixed fifteen seconds")
-    end
-    for _, points in ipairs({ 0, -50, -1.1, -0.4, -0.91, math.huge, -math.huge, 0 / 0, "-0.9", false }) do
-        local bad = ClosedWrong(store.db.nextQuestionId)
-        bad.answers[1].points = points
-        Check(
-            not store:RecordRound("Existing", "PUBLIC", bad),
-            "new incorrect points must match their versioned timing rule"
-        )
-    end
-    for _, version in ipairs({ 0, 3, -1, 1.5, "1", false, {}, math.huge, 0 / 0 }) do
-        local badHistory = PreviousRound(1, false, 0, 10, true)
-        badHistory.scoringVersion = version
-        local bad =
-            { schemaVersion = 5, leagues = { Invalid = { PUBLIC = { lastRoundId = 1, history = { badHistory } } } } }
-        Check(store:Initialize(bad) == nil, "unknown historical scoring versions are rejected atomically")
-        Same(store.db, mixedPreserved, "unknown historical versions leave all existing data untouched")
-    end
-    local untaggedHistory = {
-        schemaVersion = 5,
-        leagues = {
-            Invalid = {
-                PUBLIC = {
-                    lastRoundId = 1,
-                    history = { PreviousRound(1, false, 0, 10) },
-                },
-            },
-        },
-    }
-    Check(store:Initialize(untaggedHistory) == nil, "current-schema history must retain explicit scoring tags")
-    local newInOld = {
-        schemaVersion = 4,
-        leagues = {
-            Invalid = {
-                PUBLIC = {
-                    lastRoundId = 1,
-                    history = { ClosedWrong(1) },
-                },
-            },
-        },
-    }
-    Check(store:Initialize(newInOld) == nil, "schema-four input cannot smuggle new negative scoring records")
-    for _, duration in ipairs({ 10, 20, 60 }) do
-        local badHistory = ClosedWrong(1)
-        badHistory.duration = duration
-        local bad =
-            { schemaVersion = 5, leagues = { Invalid = { PUBLIC = { lastRoundId = 1, history = { badHistory } } } } }
-        Check(store:Initialize(bad) == nil, "version-two stored history requires the original fifteen-second window")
-        Same(store.db, mixedPreserved, "invalid version-two duration cannot replace valid mixed history")
-    end
-    local historicalWrong = PreviousRound(1, false, 0, 10)
-    historicalWrong.answers[1].points = -1
-    local penalizedOld = {
-        schemaVersion = 4,
-        leagues = {
-            Invalid = {
-                PUBLIC = {
-                    lastRoundId = 1,
-                    history = { historicalWrong },
-                },
-            },
-        },
-    }
-    Check(store:Initialize(penalizedOld) == nil, "old zero-penalty histories cannot accept new negative answers")
-    local incorrectlyTimedOld = PreviousRound(1, true, 5, 20)
-    incorrectlyTimedOld.answers[1].points = 2.4
-    local badOldTiming = {
-        schemaVersion = 4,
-        leagues = {
-            Invalid = {
-                PUBLIC = {
-                    lastRoundId = 1,
-                    history = { incorrectlyTimedOld },
-                },
-            },
-        },
-    }
-    Check(
-        store:Initialize(badOldTiming) == nil,
-        "historical correct points still validate against their original timing"
-    )
-    Same(store.db, mixedPreserved, "invalid migration inputs preserve the mixed-version database")
-    local liveCalculator = Quiz.Scoring.Calculate
-    Quiz.Scoring.Calculate = function()
-        error("historical migration must not call the live scorer")
-    end
-    local frozenHistory = store:Initialize(savedVariableClock)
-    Quiz.Scoring.Calculate = liveCalculator
-    Check(frozenHistory ~= nil, "historical records validate independently of the current scoring implementation")
-    Same(store:GetStandings("Existing", "PUBLIC")[1].score, 9, "frozen old-rule validation preserves supplied totals")
-
-    local negativeDb = store:Initialize(nil)
-    for id = 1, 1000 do
-        Check(store:RecordRound("Negative precision", "PUBLIC", ClosedWrong(id)), "repeated timed penalties persist")
-        Same(
-            store:GetStandings("Negative precision", "PUBLIC")[1].score,
-            -id * 9 / 10,
-            "negative tenth totals do not drift"
-        )
-    end
-    Check(store:Initialize(negativeDb) ~= nil, "large negative totals validate on reload")
-    Same(
-        store:GetStandings("Negative precision", "PUBLIC")[1].score,
-        -900,
-        "all penalties survive bounded-history reload"
-    )
-    Same(store:GetStandings("Negative precision", "PUBLIC")[1].incorrect, 1000, "penalties count one mistake per round")
-    Check(store:RecordRound("Recovery", "PUBLIC", ClosedWrong(1001)), "another league may begin below zero")
-    Check(
-        store:RecordRound("Recovery", "PUBLIC", ClosedCorrect(1002, 0)),
-        "a correct answer can recover a negative total"
-    )
-    Same(store:GetStandings("Recovery", "PUBLIC")[1].score, 1.6, "signed accumulation crosses zero without truncation")
-
-    local skipGame = NewGame(2)
-    Open(skipGame, store:NextQuestionId(), 0)
-    Check(
-        skipGame:Submit("Skip", "Skip-Realm", skipGame.round.id, 2, 0, "wrong.1"),
-        "skip fixture first earns a penalty"
-    )
-    local skippedPenalty = skipGame:CloseQuestion(15)
-    Check(store:RecordRound("Skip", "PUBLIC", skippedPenalty), "skip fixture penalty persists")
-    Open(skipGame, store:NextQuestionId(), 18)
-    local skippedRound = skipGame:CloseQuestion(33)
-    Same(skippedRound.totalAnswers, 0, "an unanswered question records no choice")
-    Same(skipGame:GetStandings()[1].score, -1, "skipping does not add another penalty in memory")
-    Check(store:RecordRound("Skip", "PUBLIC", skippedRound), "an unanswered round can finalize for progression")
-    Same(store:GetStandings("Skip", "PUBLIC")[1].score, -1, "skipping does not add another persistent penalty")
-    Same(store:GetStandings("Skip", "PUBLIC")[1].answers, 1, "skipping cannot inflate participation counts")
-    local skipDb = store.db
-    Check(store:Initialize(skipDb) ~= nil, "signed totals alongside unanswered history reload")
-    Same(
-        store:GetStandings("Skip", "PUBLIC")[1].score,
-        -1,
-        "reloading never retroactively penalizes a skipped question"
-    )
-    local signedPreserved = store.db
-    local scoreLimit = math.floor(9007199254740991 / 10)
-    for _, score in ipairs({
-        -0.01,
-        -1.11,
-        0.01,
-        1.11,
-        scoreLimit + 1,
-        -scoreLimit - 1,
-        math.huge,
-        -math.huge,
-        0 / 0,
-        "-1",
-        false,
-    }) do
-        local bad = {
-            schemaVersion = 5,
-            leagues = {
-                Invalid = {
-                    PUBLIC = {
-                        players = {
-                            Bad = { name = "Bad-Realm", score = score, correct = 0, incorrect = 1, answers = 1 },
-                        },
-                    },
-                },
-            },
-        }
-        Check(store:Initialize(bad) == nil, "signed scores still reject unsafe, nonfinite, and non-tenth totals")
-        Same(store.db, signedPreserved, "invalid signed totals leave valid history untouched")
-    end
-    for _, score in ipairs({ scoreLimit, -scoreLimit }) do
-        local limits = {
-            schemaVersion = 5,
-            leagues = {
-                Limits = {
-                    PUBLIC = {
-                        players = {
-                            ["Player-1-A"] = {
-                                name = "Alice-Realm",
-                                score = score,
-                                correct = 0,
-                                incorrect = 0,
-                                answers = 0,
-                            },
-                        },
-                    },
-                },
-            },
-        }
-        local boundedDb = store:Initialize(limits)
-        Check(boundedDb ~= nil, "both signed safe-score limits remain loadable")
-        local overflow = score > 0 and ClosedCorrect(1, 0) or ClosedWrong(1)
-        Check(
-            not store:RecordRound("Limits", "PUBLIC", overflow),
-            "positive overflow and negative underflow reject before mutation"
-        )
-        Same(store:GetStandings("Limits", "PUBLIC")[1].score, score, "overflow cannot corrupt a bounded score")
-        Same(boundedDb.leagues.Limits.PUBLIC.lastRoundId, 0, "overflow cannot consume a result watermark")
-        Same(#boundedDb.leagues.Limits.PUBLIC.history, 0, "overflow cannot append a partially committed result")
-    end
-
-    local utf8Name = "選手-選服"
-    local utf8League = "精選題庫"
-    local utf8Password = "精選密碼"
-    local utf8Identity = "name:" .. utf8Name
-    Same(string.byte("選", 2), 129, "UTF-8 fixture contains the continuation byte misclassified by Windows ctype")
-    local utf8Settings = Settings(1)
-    utf8Settings.league = utf8League
-    utf8Settings.hostName = utf8Name
-    utf8Settings.channelPassword = utf8Password
-    local utf8Questions = Questions(1)
-    utf8Questions[1].key = "test:選"
-    utf8Questions[1].prompt = "請選正確答案"
-    utf8Questions[1].choices = { "選一", "選二", "選三", "選四" }
-    local utf8Game = Quiz.Game.New(utf8Settings, utf8Questions, KeepOrder)
-    Check(utf8Game ~= nil, "UTF-8 question input is valid")
-    local utf8Db = store:Initialize(nil)
-    Check(store:SaveSettings(utf8Settings), "UTF-8 league and host name persist while the retired password is ignored")
-    local utf8Id = store:NextQuestionId()
-    local utf8Round = Open(utf8Game, utf8Id, 0)
-    local forbiddenBytes = {}
-    for byte = 0, 31 do
-        forbiddenBytes[#forbiddenBytes + 1] = byte
-    end
-    forbiddenBytes[#forbiddenBytes + 1] = 127
-    forbiddenBytes[#forbiddenBytes + 1] = string.byte("|")
-    for _, byte in ipairs(forbiddenBytes) do
-        local unsafe = string.char(byte)
-        Check(
-            not utf8Game:Submit("bad" .. unsafe, utf8Name, utf8Id, 2, 1),
-            "ASCII controls and pipes remain forbidden in player keys"
-        )
-        Check(
-            not utf8Game:Submit(utf8Identity, utf8Name .. unsafe, utf8Id, 2, 1),
-            "ASCII controls and pipes remain forbidden in player names"
-        )
-        Check(
-            not store:SaveSettings({ league = utf8League .. unsafe }),
-            "ASCII controls and pipes remain forbidden in league names"
-        )
-        Check(
-            store:SaveSettings({ channelPassword = utf8Password .. unsafe }),
-            "retired passwords no longer participate in settings validation"
-        )
-        Same(store:GetSettings().channelPassword, nil, "retired UTF-8 passwords are never exposed or saved")
-        Check(
-            not store:SaveSettings({ hostName = utf8Name .. unsafe }),
-            "ASCII controls and pipes remain forbidden in host targets"
-        )
-        Check(
-            not store:RecordRound(utf8League .. unsafe, "PUBLIC", ClosedWrong(utf8Id)),
-            "unsafe league cannot accept a saved round"
-        )
-        for _, field in ipairs({ "guid", "name" }) do
-            local invalidIdentity = ClosedWrong(utf8Id)
-            invalidIdentity.answers[1][field] = utf8Name .. unsafe
-            Check(
-                not store:RecordRound(utf8League, "PUBLIC", invalidIdentity),
-                "saved identity rejects ASCII controls and pipes"
-            )
-        end
-        local invalidKey = ClosedWrong(utf8Id)
-        invalidKey.questionKey = "test:選" .. unsafe
-        Check(
-            not store:RecordRound(utf8League, "PUBLIC", invalidKey),
-            "saved question keys reject ASCII controls and pipes"
-        )
-    end
-    Same(next(utf8Round.answers), nil, "invalid control-bearing answers never consume a lock")
-    Same(store:GetSettings().league, utf8League, "invalid controls never replace valid UTF-8 league settings")
-    Same(store:GetSettings().hostName, utf8Name, "invalid controls never replace valid UTF-8 host settings")
-    Check(utf8Game:Submit(utf8Identity, utf8Name, utf8Id, 2, 1), "Chinese player name and name-based key can answer")
-    local utf8Result = utf8Game:CloseQuestion(20)
-    Check(utf8Result ~= nil, "UTF-8 answer closes normally")
-    Same(utf8Result.answers[1].points, -0.9, "UTF-8 player receives the same signed incorrect scoring")
-    Check(store:RecordRound(utf8League, "PUBLIC", utf8Result), "closed UTF-8 round saves")
-    Same(store:GetStandings(utf8League, "PUBLIC")[1].name, utf8Name, "standings retain exact UTF-8 name bytes")
-    Same(store:GetStandings(utf8League, "PUBLIC")[1].score, -0.9, "UTF-8 league retains a negative-point player")
-    local utf8Reloaded = store:Initialize(utf8Db)
-    Check(utf8Reloaded ~= nil and utf8Reloaded ~= utf8Db, "UTF-8 saved data reloads through validation and copying")
-    Same(utf8Reloaded.settings.league, utf8League, "UTF-8 league survives reload")
-    Same(utf8Reloaded.settings.hostName, utf8Name, "UTF-8 host target survives reload")
-    Same(utf8Reloaded.settings.channelPassword, nil, "retired UTF-8 password is absent after reload")
-    Same(store:GetStandings(utf8League, "PUBLIC")[1].guid, utf8Identity, "UTF-8 name-based identity survives reload")
-    Same(store:GetStandings(utf8League, "PUBLIC")[1].name, utf8Name, "UTF-8 display name survives reload")
-    Same(store:GetStandings(utf8League, "PUBLIC")[1].score, -0.9, "negative UTF-8 score survives reload")
-    Same(
-        utf8Reloaded.leagues[utf8League].PUBLIC.history[1].questionKey,
-        "test:選",
-        "UTF-8 question key survives history reload"
-    )
-    Same(
-        utf8Reloaded.leagues[utf8League].PUBLIC.history[1].answers[1].name,
-        utf8Name,
-        "UTF-8 answer name survives history reload"
-    )
-    Same(
-        utf8Reloaded.leagues[utf8League].PUBLIC.history[1].answers[1].points,
-        -0.9,
-        "negative UTF-8 answer points survive history reload"
-    )
-    Check(not store:RecordRound(utf8League, "PUBLIC", utf8Result), "UTF-8 reload retains exactly-once persistence")
-    Same(store:GetStandings(utf8League, "PUBLIC")[1].score, -0.9, "duplicate UTF-8 round cannot change totals")
-
-    for count = 4, 6 do
-        for authoredCorrect = 1, count do
-            for _, random in ipairs({
-                KeepOrder,
-                function()
-                    return 1
-                end,
-            }) do
-                local deck = Questions(1)
-                local question = deck[1]
-                question.choices = {}
-                for index = 1, count do
-                    question.choices[index] = "Answer " .. index
-                end
-                question.correctIndex = authoredCorrect
-                question.difficulty, question.era = "very_hard", "Warcraft III"
-                question.source = "https://warcraft.wiki.gg/wiki/Test_reference"
-                local choiceGame = Quiz.Game.New(Settings(1), deck, random)
-                Check(choiceGame ~= nil, "model accepts four through six choices")
-                local active = Open(choiceGame, 1, 100)
-                Same(#active.choices, count, "shuffling keeps exactly the authored choices")
-                Same(active.choiceCount, count, "round retains its actual answer count")
-                Same(
-                    active.choices[active.correctIndex],
-                    "Answer " .. authoredCorrect,
-                    "shuffle maps every correct index"
-                )
-                Same(active.difficulty, "very_hard", "difficulty follows the shuffled question")
-                Same(active.era, "Warcraft III", "era follows the shuffled question")
-                Same(active.source, question.source, "host retains the editorial source without rewriting it")
-                Check(not choiceGame:Submit("Choices", "Choices-Realm", 1, count + 1, 101), "extra choice is rejected")
-                Same(next(active.answers), nil, "out-of-range answers have no scoring side effects")
-                local wrong = active.correctIndex % count + 1
-                Check(choiceGame:Submit("Choices", "Choices-Realm", 1, wrong, 101), "a valid wrong choice is accepted")
-                Same(active.answers.Choices.points, -0.9, "every valid wrong choice receives its timed penalty")
-                Check(
-                    choiceGame:Submit("Choices", "Choices-Realm", 1, active.correctIndex, 103, "answer.2"),
-                    "answer can change"
-                )
-                Same(active.answers.Choices.points, 2.2, "correct replacement uses its latest host arrival")
-                Check(
-                    choiceGame:Submit("Choices", "Choices-Realm", 1, active.correctIndex, 104, "answer.2"),
-                    "same action retries"
-                )
-                Same(active.answers.Choices.elapsed, 3, "same-action retries preserve the chosen timestamp")
-                local result = choiceGame:CloseQuestion(115)
-                Same(result.choiceCount, count, "closed result records its choice count")
-                Same(result.correctIndex, active.correctIndex, "result reveals the shuffled correct index")
-                Same(result.source, question.source, "host result retains the question's source")
-                local db = store:Initialize(nil)
-                Check(store:RecordRound("Choices", "PUBLIC", result), "all choice counts enter persistent history")
-                local loaded = store:Initialize(db)
-                Check(loaded ~= nil, "four-to-six-choice history reloads safely")
-                local entry = loaded.leagues.Choices.PUBLIC.history[1]
-                Same(entry.choiceCount, count, "history preserves its explicit answer-count bound")
-                Same(entry.answers[1].choiceIndex, active.correctIndex, "fifth and sixth choices survive reload")
-                Same(entry.answers[1].points, 2.2, "extended-choice scoring survives reload")
-                Same(entry.source, nil, "question source is not duplicated into SavedVariables")
-                Same(store:GetStandings("Choices", "PUBLIC")[1].score, 2.2, "extended choices use normal league totals")
-            end
-        end
-    end
-    for _, count in ipairs({ 0, 3, 7 }) do
-        local deck = Questions(1)
-        deck[1].choices = {}
-        for index = 1, count do
-            deck[1].choices[index] = "Answer " .. index
-        end
-        Same(Quiz.Game.New(Settings(1), deck), nil, "model rejects choices outside four to six")
-    end
-    for _, count in ipairs({ 3, 7, 4.5, "6", false }) do
-        local result = ClosedCorrect(1)
-        result.choiceCount = count
-        store:Initialize(nil)
-        Check(not store:RecordRound("Choices", "PUBLIC", result), "persistent choice counts are strictly bounded")
-    end
-    local oldFour = ClosedWrong(1)
-    oldFour.answers[1].choiceIndex = 5
-    store:Initialize(nil)
-    Check(not store:RecordRound("Choices", "PUBLIC", oldFour), "missing historical choiceCount still means four")
-    oldFour.choiceCount = 5
-    Check(store:RecordRound("Choices", "PUBLIC", oldFour), "explicit five-choice history accepts its fifth option")
-    for version = 1, 6 do
-        for _, retiredId in ipairs({ "warcraft_basics", "warcraft-basics" }) do
-            local saved = { schemaVersion = version, settings = { packId = retiredId, league = "Pack upgrade" } }
-            local upgraded = store:Initialize(saved)
-            Check(upgraded ~= nil, "old built-in selection upgrades in every supported schema")
-            Same(upgraded.settings.packId, "warcraft-lore", "old built-in selection points to its replacement")
-            Same(upgraded.settings.league, "Pack upgrade", "pack replacement preserves the selected league")
-            Same(saved.settings.packId, retiredId, "selection normalization never mutates caller-owned saved data")
-            Check(store:SaveSettings({ packId = retiredId }), "old UI drafts also resolve the replacement pack")
-            Same(store:GetSettings().packId, "warcraft-lore", "resaving cannot restore a removed built-in selection")
-        end
-    end
-    for _, untouched in ipairs({ "all", "warcraft_basics_custom", "warcraft-basics-extra", "custom-lore" }) do
-        store:Initialize(nil)
-        Check(store:SaveSettings({ packId = untouched }), "unrelated pack selection remains valid")
-        Same(store:GetSettings().packId, untouched, "only exact retired built-in ids migrate")
-    end
-
-    do
-        Same(Quiz.WIDGET_SCALE_MIN, 50, "appearance scale starts at fifty percent")
-        Same(Quiz.WIDGET_SCALE_MAX, 200, "appearance scale ends at two hundred percent")
-        Same(Quiz.WIDGET_SCALE_STEP, 5, "appearance scale uses five-percent increments")
-        Same(Quiz.WIDGET_SCALE_DEFAULT, 100, "appearance scale defaults to one hundred percent")
-        local appearanceDb = store:Initialize(nil)
-        local defaults = { scale = 100, font = "" }
-        Same(appearanceDb.schemaVersion, 6, "appearance preferences do not introduce another scoring migration")
-        SameTable(store:GetWidgetSettings(), defaults, "new installations receive native appearance defaults")
-        local returned = store:GetWidgetSettings()
-        Check(returned ~= appearanceDb.widgetSettings, "appearance getter does not expose the saved table")
-        Check(returned ~= store:GetWidgetSettings(), "every appearance getter returns a fresh copy")
-        returned.scale, returned.font = 200, "Changed outside Store"
-        SameTable(store:GetWidgetSettings(), defaults, "mutating an appearance copy does not affect SavedVariables")
-        Check(
-            store:RecordRound("Appearance", "PUBLIC", ClosedWrong(1)),
-            "appearance fixture has existing signed scores"
-        )
-        Check(store:SaveWidgetPosition(0.27, 0.83), "appearance fixture has an independently saved anchor")
-        local hostSettings = store:GetSettings()
-        local position = store:GetWidgetPosition()
-        local leagues, archives = appearanceDb.leagues, appearanceDb.legacyLeagues
-        local nextId = appearanceDb.nextQuestionId
-        local incoming = { scale = 125, font = "Font from an absent SharedMedia pack" }
-        Check(
-            store:SaveWidgetSettings(incoming),
-            "unavailable safe font keys can be saved independently of font loading"
-        )
-        SameTable(store:GetWidgetSettings(), incoming, "appearance stores the requested scale and font name")
-        Check(appearanceDb.widgetSettings ~= incoming, "appearance setter copies caller-owned settings")
-        incoming.scale, incoming.font = 195, "Caller mutation"
-        Same(store:GetWidgetSettings().scale, 125, "later caller mutation cannot alter the saved scale")
-        Same(
-            store:GetWidgetSettings().font,
-            "Font from an absent SharedMedia pack",
-            "later caller mutation cannot alter the saved font"
-        )
-        Check(store:SaveWidgetSettings({ scale = 150 }), "scale can be patched without supplying a font")
-        Same(
-            store:GetWidgetSettings().font,
-            "Font from an absent SharedMedia pack",
-            "scale patch preserves the saved font"
-        )
-        Check(store:SaveWidgetSettings({ font = "Selected Font" }), "font can be patched without supplying a scale")
-        Same(store:GetWidgetSettings().scale, 150, "font patch preserves the saved scale")
-        Check(store:SaveWidgetSettings({}), "an empty appearance patch preserves the current choices")
-        SameTable(
-            store:GetWidgetSettings(),
-            { scale = 150, font = "Selected Font" },
-            "empty appearance patch is a value no-op"
-        )
-        Check(
-            store:SaveWidgetSettings({ duration = 60, league = "Other", widgetPosition = { x = 0, y = 0 } }),
-            "appearance only copies its supported fields"
-        )
-        SameTable(
-            store:GetWidgetSettings(),
-            { scale = 150, font = "Selected Font" },
-            "unknown appearance fields are never persisted"
-        )
-        SameTable(store:GetSettings(), hostSettings, "appearance changes never alter host setup")
-        SameTable(store:GetWidgetPosition(), position, "appearance changes never move the widget")
-        Same(appearanceDb.leagues, leagues, "appearance saves preserve all score-board identities")
-        Same(appearanceDb.legacyLeagues, archives, "appearance saves preserve all archived board identities")
-        Same(appearanceDb.nextQuestionId, nextId, "appearance saves do not allocate question IDs")
-        Same(store:GetStandings("Appearance", "PUBLIC")[1].score, -0.9, "appearance saves preserve earned penalties")
-        Same(
-            appearanceDb.leagues.Appearance.PUBLIC.history[1].scoringVersion,
-            2,
-            "appearance saves preserve historical scoring metadata"
-        )
-        Same(appearanceDb.settings.widgetSettings, nil, "appearance is not part of game settings")
-        Same(appearanceDb.settings.scale, nil, "appearance scale is not a game setting")
-        Same(appearanceDb.settings.font, nil, "appearance font is not a game setting")
-        Check(
-            store:SaveSettings({ league = "Host changed", scale = 50, font = "Wrong owner" }),
-            "game setup can change independently of appearance"
-        )
-        Check(store:SaveWidgetPosition(0.12, 0.34), "widget position can change independently of appearance")
-        SameTable(
-            store:GetWidgetSettings(),
-            { scale = 150, font = "Selected Font" },
-            "other settings owners cannot overwrite appearance"
-        )
-        for scale = 50, 200, 5 do
-            Check(store:SaveWidgetSettings({ scale = scale }), "every supported scale step can be saved")
-            Same(store:GetWidgetSettings().scale, scale, "scale steps persist without conversion or rounding")
-            Same(store:GetWidgetSettings().font, "Selected Font", "every scale step preserves the chosen font")
-        end
-        for _, font in ipairs({
-            "",
-            "Friz Quadrata TT",
-            "Font (Bold)",
-            "選定字體",
-            string.rep("f", 128),
-            string.rep("選", 42) .. "ab",
-        }) do
-            Check(store:SaveWidgetSettings({ font = font }), "safe native-default, named and UTF-8 font keys save")
-            Same(store:GetWidgetSettings().font, font, "font keys are retained byte-for-byte")
-        end
-        Check(
-            store:SaveWidgetSettings({ scale = 125, font = "Missing on this device" }),
-            "restore known appearance before rejection tests"
-        )
-        local savedAppearance = appearanceDb.widgetSettings
-        local stableHostSettings, stablePosition = appearanceDb.settings, appearanceDb.widgetPosition
-        local function RejectAppearance(value, reason)
-            local accepted, failure = store:SaveWidgetSettings(value)
-            Same(accepted, false, "invalid appearance patch rejects")
-            Same(failure, reason, "appearance validation reports the specific invalid field")
-            Same(store.db, appearanceDb, "invalid appearance patch cannot replace the database")
-            Same(
-                appearanceDb.widgetSettings,
-                savedAppearance,
-                "invalid appearance patch cannot replace prior preferences"
-            )
-            SameTable(
-                store:GetWidgetSettings(),
-                { scale = 125, font = "Missing on this device" },
-                "invalid appearance patch is atomic"
-            )
-            Same(appearanceDb.settings, stableHostSettings, "invalid appearance cannot modify host settings")
-            Same(appearanceDb.widgetPosition, stablePosition, "invalid appearance cannot modify widget position")
-            Same(appearanceDb.leagues, leagues, "invalid appearance cannot modify current scores")
-            Same(appearanceDb.legacyLeagues, archives, "invalid appearance cannot modify archived scores")
-            Same(appearanceDb.nextQuestionId, nextId, "invalid appearance cannot modify question IDs")
-        end
-        RejectAppearance(nil, "invalid_widget_settings")
-        for _, value in ipairs({ false, true, 100, "font", function() end }) do
-            RejectAppearance(value, "invalid_widget_settings")
-        end
-        for _, scale in ipairs({
-            0,
-            -50,
-            49,
-            201,
-            51,
-            99,
-            101,
-            199,
-            100.5,
-            math.huge,
-            -math.huge,
-            0 / 0,
-            "100",
-            false,
-            {},
-        }) do
-            RejectAppearance({ scale = scale, font = "Must not partially save" }, "invalid_widget_scale")
-        end
-        for _, font in ipairs({
-            " ",
-            "   ",
-            string.rep("f", 129),
-            false,
-            true,
-            0,
-            {},
-            "|cffff0000Font",
-            "Font|r",
-            "Font\nName",
-            "Font\tName",
-            "Font\127Name",
-            "Font\0Name",
-        }) do
-            RejectAppearance({ scale = 200, font = font }, "invalid_widget_font")
-        end
-        for byte = 0, 31 do
-            RejectAppearance({ font = "Font" .. string.char(byte) }, "invalid_widget_font")
-        end
-        local reloadedAppearance = store:Initialize(appearanceDb)
-        Check(reloadedAppearance ~= nil, "appearance settings reload beside existing scores")
-        SameTable(
-            store:GetWidgetSettings(),
-            { scale = 125, font = "Missing on this device" },
-            "scale and unavailable font survive reload"
-        )
-        SameTable(
-            store:GetWidgetPosition(),
-            { x = 0.12, y = 0.34 },
-            "reloading appearance preserves independent anchor"
-        )
-        Same(store:GetSettings().league, "Host changed", "reloading appearance preserves host setup")
-        Same(store:GetStandings("Appearance", "PUBLIC")[1].score, -0.9, "reloading appearance preserves signed scores")
-        Check(
-            reloadedAppearance.widgetSettings ~= appearanceDb.widgetSettings,
-            "initialization copies saved appearance"
-        )
-        appearanceDb.widgetSettings.scale = 175
-        Same(store:GetWidgetSettings().scale, 125, "mutating old SavedVariables input cannot change loaded appearance")
-
-        for version = 1, 6 do
-            local old = { schemaVersion = version, widgetPosition = { x = 0.3, y = 0.7 } }
-            local loaded = store:Initialize(old)
-            Check(loaded ~= nil, "every supported schema accepts absent appearance settings")
-            SameTable(store:GetWidgetSettings(), defaults, "missing appearance receives defaults without a schema bump")
-            Same(old.widgetSettings, nil, "defaults are never written into the supplied old database")
-            old.widgetSettings = { scale = 175, font = "Saved but unavailable font" }
-            loaded = store:Initialize(old)
-            Check(loaded ~= nil, "every migration path retains optional appearance settings")
-            Same(loaded.schemaVersion, 6, "appearance loading preserves the existing current schema version")
-            SameTable(store:GetWidgetSettings(), old.widgetSettings, "migration carries scale and font preferences")
-            SameTable(store:GetWidgetPosition(), old.widgetPosition, "appearance migration leaves the anchor unchanged")
-            Check(
-                loaded.widgetSettings ~= old.widgetSettings,
-                "migration copies optional appearance instead of sharing it"
-            )
-            old.widgetSettings = { scale = 50 }
-            Check(store:Initialize(old) ~= nil, "old partial appearance settings receive missing defaults")
-            SameTable(store:GetWidgetSettings(), { scale = 50, font = "" }, "missing font defaults to native text")
-            old.widgetSettings = { font = "Saved Font" }
-            Check(store:Initialize(old) ~= nil, "a font-only saved preference remains supported")
-            SameTable(
-                store:GetWidgetSettings(),
-                { scale = 100, font = "Saved Font" },
-                "missing scale defaults independently"
-            )
-            local intact = store.db
-            for _, invalid in ipairs({
-                { value = false, reason = "invalid_widget_settings" },
-                { value = 100, reason = "invalid_widget_settings" },
-                { value = "Font", reason = "invalid_widget_settings" },
-                { value = { scale = 99 }, reason = "invalid_widget_scale" },
-                { value = { scale = "100" }, reason = "invalid_widget_scale" },
-                { value = { font = " " }, reason = "invalid_widget_font" },
-                { value = { font = "|Ttexture|t" }, reason = "invalid_widget_font" },
-            }) do
-                old.widgetSettings = invalid.value
-                local rejected, reason = store:Initialize(old)
-                Same(rejected, nil, "every migration validates optional appearance before replacing the database")
-                Same(reason, invalid.reason, "invalid saved appearance reports a stable reason")
-                Same(store.db, intact, "invalid saved appearance preserves the complete prior database")
-                Same(old.widgetSettings, invalid.value, "failed appearance migration never edits supplied input")
-            end
-        end
-        local legacyAppearance = {
-            schemaVersion = 3,
-            widgetSettings = { scale = 135, font = "Archive Font" },
-            leagues = { Archive = { PUBLIC = LegacyBoard(7, false), WHISPER = LegacyBoard(8, true) } },
-        }
-        local migratedAppearance = store:Initialize(legacyAppearance)
-        Check(migratedAppearance ~= nil, "appearance preferences migrate beside old hundred-point boards")
-        SameTable(
-            store:GetWidgetSettings(),
-            legacyAppearance.widgetSettings,
-            "legacy scoring migration retains appearance"
-        )
-        SameTable(
-            migratedAppearance.legacyLeagues,
-            legacyAppearance.leagues,
-            "legacy scoring migration retains all archived history"
-        )
-        Same(
-            store:GetLegacyStandings("Archive", "PUBLIC")[1].score,
-            -50,
-            "appearance migration leaves archived penalties untouched"
-        )
-        Same(
-            store:GetLegacyStandings("Archive", "WHISPER")[1].score,
-            120,
-            "appearance migration leaves archived bonuses untouched"
-        )
-        local decimalAppearance = {
-            schemaVersion = 4,
-            widgetSettings = { scale = 90, font = "Earlier Font" },
-            leagues = {
-                Earlier = {
-                    PUBLIC = {
-                        lastRoundId = 1,
-                        players = {
-                            ["Player-1-A"] = {
-                                name = "Alice-Realm",
-                                score = 2.5,
-                                correct = 1,
-                                incorrect = 0,
-                                answers = 1,
-                            },
-                        },
-                        history = { PreviousRound(1, true, 5, 20) },
-                    },
-                },
-            },
-        }
-        local upgradedAppearance = store:Initialize(decimalAppearance)
-        Check(upgradedAppearance ~= nil, "appearance preferences migrate beside old decimal scoring")
-        SameTable(
-            store:GetWidgetSettings(),
-            decimalAppearance.widgetSettings,
-            "decimal migration retains selected appearance"
-        )
-        Same(
-            store:GetStandings("Earlier", "PUBLIC")[1].score,
-            2.5,
-            "appearance migration never rescales old decimal totals"
-        )
-        Same(
-            upgradedAppearance.leagues.Earlier.PUBLIC.history[1].scoringVersion,
-            1,
-            "appearance does not interfere with scoring-version migration"
-        )
-        Same(
-            upgradedAppearance.leagues.Earlier.PUBLIC.history[1].duration,
-            20,
-            "appearance does not rewrite historical answer windows"
-        )
-    end
+    store:Bind(store:Normalize(nil))
+    Same(store:NextQuestionId(), 1, "newly bound default database starts its question allocator at one")
+    Same(store:NextQuestionId(), 2, "question allocator advances monotonically")
 
     do
         local function Winner(actions, multiplayer)
@@ -2063,21 +693,20 @@ return function(Quiz)
             streakBonusPerCorrect = 0.2,
             streakBonusMax = 1,
         }
-        local hostSettings =
-            { duration = 1, answerSeconds = 1, continuous = "false", questionCount = -1, correctPoints = 99 }
-        local explicit, reason = Quiz.Game.New(hostSettings, Questions(2), function(maximum)
+        local hostSettings = { duration = 1, answerSeconds = 1, continuous = "false", correctPoints = 99 }
+        local explicit, reason = Quiz.Model.New(hostSettings, Questions(2), function(maximum)
             calls = calls + 1
             return maximum
         end, authoredRules)
         Check(explicit ~= nil, "valid pack rules override every obsolete host rule field: " .. tostring(reason))
-        Same(explicit.settings.duration, 30, "resolved pack duration owns the model clock")
+        Same(explicit.rules.answerSeconds, 30, "resolved pack duration owns the model clock")
         Same(explicit.continuous, true, "host finite-setting values cannot override authored endless play")
         Same(explicit.scoringVersion, 3, "explicit pack rules create version-three scoring results")
         Same(calls, 0, "fixed authored question order never calls the random source")
         local canonical = Quiz.Rules.Encode(authoredRules)
         authoredRules.answerSeconds, authoredRules.correctPoints = 120, 999
         hostSettings.duration = 120
-        explicit.settings.duration, explicit.settings.questionCount = 120, 1
+        explicit.settings.duration = 120
         local current = Open(explicit, 1, 100)
         Same(current.key, "test:q1", "fixed order begins with the first authored question")
         Same(current.deadline, 130, "copied pack rules ignore later author and host-setting mutations")
@@ -2113,7 +742,7 @@ return function(Quiz)
         Same(current.cycle, 2, "authored fixed repetition still tracks full cycles")
         Same(calls, 0, "question and choice shuffling toggles cover every repeated cycle")
         for _, raw in ipairs({ false, "rules", { answerSeconds = 0 }, { streakBonusPerCorrect = 0.1 } }) do
-            local invalid = Quiz.Game.New({}, Questions(1), KeepOrder, raw)
+            local invalid = Quiz.Model.New({}, Questions(1), KeepOrder, raw)
             Same(invalid, nil, "model rejects invalid externally supplied pack rules at its constructor boundary")
         end
     end
@@ -2135,7 +764,7 @@ return function(Quiz)
                 shuffleQuestions = false,
                 shuffleChoices = false,
             })
-            local finite = Quiz.Game.New({}, Questions(case.deck), KeepOrder, rules)
+            local finite = Quiz.Model.New({}, Questions(case.deck), KeepOrder, rules)
             Same(finite.total, case.total, "finite target combines author cap with repetition permission")
             Same(finite.continuous, false, "one-pass and capped quizzes are finite")
             Same(
@@ -2163,7 +792,7 @@ return function(Quiz)
             end
             Same(finite:PrepareQuestion(case.total + 1), nil, "finite quiz cannot silently start another cycle")
         end
-        local exhausted = Quiz.Game.New({}, Questions(2), KeepOrder, {
+        local exhausted = Quiz.Model.New({}, Questions(2), KeepOrder, {
             repeatQuestions = false,
             shuffleQuestions = false,
             shuffleChoices = false,
@@ -2175,7 +804,7 @@ return function(Quiz)
         Check(exhausted:Resume(), "remaining single-pass card is available after restrictions clear")
         Same(Open(exhausted, 2, 20).key, "test:q2", "resume does not replay the voided single-pass card")
         Check(exhausted:CloseQuestion(35).complete, "last available single-pass card ends the quiz")
-        local repeated = Quiz.Game.New({}, Questions(1), KeepOrder, { questionLimit = 2 })
+        local repeated = Quiz.Model.New({}, Questions(1), KeepOrder, { questionLimit = 2 })
         for id = 1, 100 do
             Check(
                 repeated:PrepareQuestion(id) ~= nil,
@@ -2197,7 +826,7 @@ return function(Quiz)
         for _, questionShuffle in ipairs({ false, true }) do
             for _, choiceShuffle in ipairs({ false, true }) do
                 local calls = 0
-                local independent = Quiz.Game.New({}, Questions(3), function()
+                local independent = Quiz.Model.New({}, Questions(3), function()
                     calls = calls + 1
                     return 1
                 end, { shuffleQuestions = questionShuffle, shuffleChoices = choiceShuffle })
@@ -2228,7 +857,7 @@ return function(Quiz)
     end
 
     do
-        local locked = Quiz.Game.New(
+        local locked = Quiz.Model.New(
             {},
             Questions(1),
             KeepOrder,
@@ -2270,7 +899,7 @@ return function(Quiz)
             streakBonusPerCorrect = 0.1,
             streakBonusMax = 0.3,
         })
-        local streakGame = Quiz.Game.New({}, Questions(1), KeepOrder, rules)
+        local streakGame = Quiz.Model.New({}, Questions(1), KeepOrder, rules)
         local id, clock = 0, 0
         local function Begin()
             id, clock = id + 1, clock + 10
@@ -2389,7 +1018,7 @@ return function(Quiz)
         Same(result.totalAnswers, 0, "entirely unanswered rounds have no made-up entries")
         Same(#result.streakMilestones, 0, "unanswered rounds produce no milestone announcements")
         Same(streakGame.players.Alice.streak, 0, "entirely unanswered rounds reset every known player's streak")
-        local fresh = Quiz.Game.New({}, Questions(1), KeepOrder, rules)
+        local fresh = Quiz.Model.New({}, Questions(1), KeepOrder, rules)
         Open(fresh, 1, 0)
         fresh:Submit("Alice", "Alice-Realm", 1, 1, 1)
         Same(fresh:CloseQuestion(5).answers[1].streak, 1, "new sessions never inherit personal or prior-game streaks")
@@ -2397,7 +1026,7 @@ return function(Quiz)
 
     do
         local rules = assert(Quiz.Rules.Normalize({ answerSeconds = 5, shuffleChoices = false }))
-        local game = assert(Quiz.Game.New({}, Questions(1), KeepOrder, rules))
+        local game = assert(Quiz.Model.New({}, Questions(1), KeepOrder, rules))
         for id = 1, 4 do
             Open(game, id, id * 10)
             game:Submit("Zed", "Zed-Realm", id, 1, id * 10 + 1)

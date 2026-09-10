@@ -1,4 +1,7 @@
-package-as: Orbit-Quiz
+package-as: Orbit-Games
+
+move-folders:
+    Orbit-Games/Compatibility/Orbit-Quiz: Orbit-Quiz
 
 externals:
     Libs/LibStub:
@@ -13,6 +16,9 @@ externals:
         commit: 7bb1e857a8482768d7401814885f593d77759436
         path: LibSharedMedia-3.0
 
+embedded-libraries:
+    - libdbicon-1-0
+
 enable-nolib-creation: no
 
 ignore:
@@ -24,5 +30,5 @@ ignore:
     - .release
     - .stylua.toml
     - Dev
-    - Packs/WarcraftLore/Archive
+    - Modes/Quiz/Packs/WarcraftLore/Archive
     - .styluaignore

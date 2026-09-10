@@ -2,47 +2,41 @@
 
 ## Description
 
-The setup/game browser and minimal Q/A HUD, with standalone native-styled controls.
+The shared Orbit-Games setup shell, game browser, controls, media catalogue and minimap launcher.
 
 ## Purpose
 
-Present game/session state and edit the widget's appearance without owning quiz rules, networking or score accounting.
+Present discovered game types and common preferences without owning a mode's rules, scoring or in-game renderer.
 
 ## Implementation
 
-`Setup.lua` exposes `Quiz.UI`: explicit joins, pack selection, read-only rule summaries, distinct score views and local preferences. Appearance saves call `Widget:ApplySettings`; volume saves call `StreakToasts:SetVolume` without reflowing the HUD, clearing toasts or changing host setup.
+`Setup.lua` owns the native-styled window, Games/Host/Results/Settings navigation and mode-view placement. Host places a native Host-to checkbox dropdown above Game Type; its persisted Server/Guild/Party selection cannot become empty, and both selectors lock while hosting or joined to a session. Shared and mode-owned Host options consume one form-label contract so native controls keep a common type role and value boundary. Games keeps current-session status and Leave in a shared footer; each mode supplies a Host footer with Orbit's button grid and its Results presenter. The shared divider is visible only while the active page exposes footer actions. Shared UI delegates host behavior and live HUD work to the mode.
 
-`Widget.lua` renders the saved-anchor Q/A HUD: pack name, wrapped prompt, two-physical-pixel timer and left-aligned choices. It reserves the score column from rule bounds/font metrics, then separate winner and streak-toast slots below the answers. All feedback has independent receipt/replay gates; revealing it never changes Q/A geometry.
+`Controls.lua`, `ScrollBar.lua`, `FontPicker.lua` and `SettingsControls.lua` own reusable native controls. Scrolling labels accept physical text insets so clipped HUD text can retain its shadow padding; join descriptions animate only when clipped and retain animation progress across unrelated discovery updates.
 
-`StreakToasts.lua` owns a transparent native-art burst, masked shine and serialized SFX playback. The widget consumes confirmed group milestones, deduplicates by host/session/round/player, and supplies its font objects and bounded footer slot. Late name resolution adds only unseen players. The pending queue is bounded to 32 entries and coalesces each waiting player's latest streak. The queue-drained callback ends a temporary preview only after both visuals and audio finish.
+`Media.lua` resolves the bundled logo, SharedMedia fonts and mode-requested sound paths. `Minimap.lua` registers one LibDataBroker/LibDBIcon launcher; left-click routes `/og`, right-click opens Settings, and the library owns dragging and its private tooltip.
 
-`Controls.lua` owns native buttons, inputs, gold tabs, dropdown adapters, panels, dividers and clipped scrolling labels. Join descriptions animate only their overflow, using native out-and-back translations with endpoint pauses. `ScrollBar.lua` owns explicit scroll bounds and active-only animated motion. `SettingsControls.lua` adapts native Edit Mode sliders to compact label/control/value rows.
-
-`FontPicker.lua` owns both its arrow control and private searchable, virtualized popup. `Media.lua` resolves the shared font catalogue and bundled streak sound paths. Font changes reach the application-supplied callback, never setup/HUD owners directly. Missing font names retain their saved preference.
+Quiz names its Results tab “Scores”; Cards uses the shared “Results” label. Quiz exposes only Personal score and Current game in its scope dropdown, with no passive bottom guidance or visible scoring-rule paragraphs, so its scrolling list occupies the reclaimed page space. Its Q/A renderer permanently shows the player’s current total in the right lane and overlays each confirmed signed delta there without moving the total. Hovering the total requests current host standings and opens a Quiz-owned private tooltip with up to 100 ranked players; nothing is downloaded until hover. `/og scores` and Cards `/og results` open the active mode's Results page, `/og packs` opens Quiz Host, and `/og status` opens Games. Archived Quiz standings remain preservation-only with no visible projection. Score/Q&A and table/session-result presenters stay inside their respective mode directories.
 
 ## Gotchas
 
-- Only an open `/oq` window enables the purple edit outline and dragging. A live HUD has no Close/Escape action; closing setup locks position without leaving. Leave/Stop ends play.
-- Layout uses widget-local units; convert through the frame's scale for screen bounds and compare scaled rectangles for drag persistence. Horizontal screen thirds and the vertical half determine alignment/growth. Reflow must not rewrite the normalized saved anchor.
-- Pixel caches include physical resolution and effective scale. Snap root origins as well as offsets; timer/outline thickness, shadows (-2, -2), and press depth stay physical pixels at every scale.
-- `SetAtlas` loads housing-container NineSlice metadata. Keep that native art and setup button FontStrings/state scripts; never flatten the container or replace native fonts.
-- HUD labels are independent FontStrings, not `Button:SetFontString` labels. Only the pressed text shifts one physical pixel. Release, leave, hide, disable, drag and reflow restore it without moving hit areas.
-- Clear reused FontString height before measuring; wrap without line limits and round height up to a pixel. Use addon-owned font objects plus a hidden FontString success probe; failed external assets fall back uncached and retry only on settings/media updates.
-- Font changes reflow all HUD labels without changing selection, deadline, game state or setup scale. Shadows/press depth need padding inside the clipped child; acknowledgement-only updates must not trigger layout or reset idle feedback.
-- The Edit Mode slider captures callbacks during template OnLoad. Unregister `cbrHandles` before quiz callbacks, retain native track/stepper scripts, and guard programmatic synchronization against saving again.
-- Font menus close with their owner and reuse a bounded visible-row pool. Search keeps focus after Enter/clear so Escape closes only the popup; never intercept Blizzard's global `CloseSpecialWindows`.
-- Scroll children declare full content bounds at the viewport's inherited scale. Batch layout and cancel old motion; reset with `ScrollTo(0, true)` even when already at zero. Keep unsnapped motion separate from snapped rendering; transient native descendant ranges are not authoritative.
-- Retain unchanged game rows across discovery updates so long descriptions can finish scrolling. Place the clipping viewport, not its full-width FontString; recompute overflow on reflow and stop native translations when hidden, recycled or no longer truncated.
-- Live feedback requires confirmed results. No timer-only results, no replay on reconnect/refresh, and no question/answer movement during a reveal. `SetStreakPreview` is a separate idle-only presentation hook for development fixtures: read-only Q/A, no fake session/result data, and no persistence. It rejects live membership and yields immediately when play starts.
-- Streak toasts may drain across ordinary question changes. Pause, restrictions, leave, any session end, host switch, hiding, dragging or appearance reflow cancel pending playback without replay. A finite game's final reveal is not extended to drain toasts.
-- Custom-file playback has no per-sound gain API. `Media:GetStreakSound` selects pre-attenuated Ogg variants for 10–90%, original MP3s at 100%, or no sound at 0%. Keep SFX routing and never change global sound CVars. Regenerate variants with `Dev/SoundVolumes.py` after replacing originals.
-- Nonzero volume changes apply to the next clip; muting stops only the owned current sound. Visuals/queued milestones remain, and unmuting never replays a consumed clip. Playback failure must not break visual feedback.
-- A 3.2-second animation is not proof that native playback has finished. Normal advancement checks `C_Sound.IsPlaying`, polls only an outstanding audio tail, and never calls `StopSound`; explicit cancellation/mute still do. Clear removes the poll before stopping anything.
-- Burst art uses 80% of its reserved text slot, centered with a four-physical-pixel drop and symmetric pixel-snapped insets. The shine follows those bounds. Allow downward art overhang at small scales without clipping; the HUD's screen margin contains it. There is no background or divider. Player name sits above only `X in a row`, never a sound-tier title. At 10+ the caption alone pulses from 100% to 120% and back during the shine; native transforms leave text layout and Q/A geometry unchanged and are stopped on cancellation/reuse.
+- Only an open `/og` window enables a mode's edit presentation. Even then, movement begins only on the literal Quiz question text or the five-card Cards community row; full frames, backgrounds, answers, player rows and actions do not drag. Closing setup locks movement without leaving the active game.
+- Keep the setup root hidden until construction finishes; presenter refreshes may run while mode controls are being created.
+- Do not copy the minimap save subtree before passing it to LibDBIcon, create a second broker button, or own the global `GameTooltip`.
+- Quiz score hover must own and hide only its private tooltip. Hover requests and revisioned snapshot refreshes must not submit answers, alter totals, persist receipts or replay result feedback.
+- Pixel caches include physical resolution and effective scale. Shared chrome and mode renderers must snap roots as well as offsets.
+- The Edit Mode slider captures callbacks during template OnLoad. Unregister native callbacks before addon callbacks and guard programmatic synchronization. Its outer row is a plain Frame, so enabled state must delegate to the inner MinimalSlider.
+- Font menus close with their owner, retain search focus for Escape and reuse bounded visible rows. Probe external assets with FontStrings; `Font:SetFont` has no success return. Never intercept Blizzard's global `CloseSpecialWindows`.
+- Scroll children declare explicit content bounds; cancel old motion and reset to zero even when already at zero. Accumulate easing in unsnapped coordinates so subpixel steps cannot stall.
+- A mode renderer receives confirmed state. Shared UI must not manufacture timer-only results, scores or replayable feedback.
+- The shared notice lane is reserved for real action or session failures and stays hidden otherwise; passive hints and mode guidance do not belong there.
+- Notices are the error/status boundary; the shell must never fall back to a visible-chat post.
+- Pages without footer actions show neither the footer nor its divider.
+- Results presenters use the full actionless page body; do not reserve a passive guidance lane beneath their lists.
+- Keep the Games notice lane between its fixed-height browser and footer. Extending the list into that space makes real join/leave failures overlap its final rows.
 
 ## References
 
-- [Application](../App/README.md), [saved appearance](../Data/README.md), [verification](../Docs/QUICKSTART.md), and [UI regressions](../Dev/Tests/README.md).
-- Orbit visual references live under `../../Orbit/Orbit/`: `Core/Foundation/DialogChrome.lua`, `Core/Config/Panels/OrbitSettingsDialog.lua`, Config widgets, and `Plugins/ErrorMessages/`. These are references, not runtime dependencies.
-- Blizzard source: `../../wow-ui-source/Interface/AddOns/` — SharedXML native controls, Menu/EditMode templates, generated rendering APIs, `Blizzard_FrameXML/ArtifactToasts.xml`, and `Blizzard_FrameXML/Mainline/AlertFrameSystems.xml` for toast/glow art.
-- Workspace skills: `wow-frames`, `pixel`, `orbit-skinning`, `strata-strategy`, `wow-secrets`, and `orbit-debug`.
+- [Application](../App/README.md), [Cards UI](../Modes/Cards/README.md), [Quiz UI](../Modes/Quiz/README.md), [saved preferences](../Data/README.md) and [verification](../Docs/QUICKSTART.md).
+- Orbit visual references live under `../../Orbit/Orbit/`; they are references, not runtime dependencies.
+- Workspace skills: `wow-frames`, `pixel`, `orbit-skinning`, `strata-strategy`, `wow-secrets` and `orbit-debug`.

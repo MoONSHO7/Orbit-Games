@@ -30,7 +30,8 @@ local RANGES = {
     { "streakBonusMax", 0, 100, 0.1 },
 }
 
-return function(Quiz)
+return function(Games)
+    local Quiz = Games.Quiz
     local assertions = 0
     local function Check(value, message)
         assertions = assertions + 1

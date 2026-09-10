@@ -28,7 +28,8 @@ local SCORE_SAMPLES = {
     { 15, 1, -0.5 },
 }
 
-return function(Quiz)
+return function(Games)
+    local Quiz = Games.Quiz
     local assertions = 0
     local function Check(value, message)
         assertions = assertions + 1
@@ -153,11 +154,13 @@ return function(Quiz)
     Same(maximumGuessNumerators[5], -7, "best five-choice blind expectation is minus 0.14 points")
     Same(maximumGuessNumerators[6], -12, "best six-choice blind expectation is minus 0.2 points")
 
-    Same(Quiz.Scoring.Add(0, -0.5), -0.5, "a wrong first answer produces a negative total rather than a free guess")
+    Same(Quiz.Scoring.Add(0, -0.5), -0.5, "a wrong first answer remains in the signed balance")
     Same(Quiz.Scoring.Add(-0.5, -0.8), -1.3, "negative tenths accumulate")
-    Same(Quiz.Scoring.Add(-1.3, 2.5), 1.2, "a correct answer can recover a negative score")
+    Same(Quiz.Scoring.Add(-1.3, 2.5), 1.2, "a correct answer can recover a negative balance")
     Same(Quiz.Scoring.Add(0.5, -0.5), 0, "opposite scores cancel exactly")
     Same(Quiz.Scoring.Add(0.1 + 0.2, -0.2), 0.1, "binary floating-point noise does not change signed tenths")
+    Same(Quiz.Scoring.Clamp(-0.5), 0, "visible totals floor a signed penalty at zero")
+    Same(Quiz.Scoring.Clamp(1.2), 1.2, "visible totals retain a recovered positive balance")
     local negativeTotal, mixedTotal = 0, 0
     for iteration = 1, ADDITION_REPETITIONS do
         negativeTotal = Quiz.Scoring.Add(negativeTotal, -0.1)
@@ -165,7 +168,7 @@ return function(Quiz)
         for _, points in ipairs({ 2.4, -1, -0.7, 0.1 }) do
             mixedTotal = Quiz.Scoring.Add(mixedTotal, points)
         end
-        Same(mixedTotal, iteration * 8 / POINT_SCALE, "mixed positive and negative scores retain exact tenths")
+        Same(mixedTotal, iteration * 8 / POINT_SCALE, "mixed positive and negative deltas retain exact tenths")
     end
     local defaultRules = Quiz.Rules.Normalize()
     for step = 0, ANSWER_SECONDS * GRID_STEPS_PER_SECOND do

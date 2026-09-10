@@ -1,7 +1,8 @@
 local PACK_ID = "warcraft-lore"
 local PACK_VERSION = 2
 
-return function(Quiz)
+return function(Games)
+    local Quiz = Games.Quiz
     local assertions = 0
     local function Check(value, message)
         assertions = assertions + 1
@@ -10,16 +11,16 @@ return function(Quiz)
 
     local questions = Quiz:GetQuestions(PACK_ID)
     Check(type(questions) == "table" and #questions >= 1000, "the comprehensive bundled catalogue is loaded")
-    local packs = Quiz:GetQuestionPacks()
+    local packs = Quiz:GetPacks()
     Check(#packs == 1 and packs[1].id == PACK_ID, "comic removal does not split or rename the bundled pack")
     Check(packs[1].version == PACK_VERSION, "comic removal updates the content version without changing the pack ID")
     Check(#Quiz:GetPackErrors() == 0, "the bundled catalogue registers without errors")
-    Check(Quiz.Lore == nil, "temporary assembly data is released after registration")
+    Check(Quiz.Lore == nil, "temporary Quiz assembly data is released after registration")
     local authored = {}
     for _, question in ipairs(questions) do
         authored[question.key] = question
     end
-    local game = Quiz.Game.New({ continuous = true }, questions, function()
+    local game = Quiz.Model.New({ continuous = true }, questions, function()
         return 1
     end)
     Check(game ~= nil and game.total == #questions, "continuous play includes every bundled question")
@@ -128,27 +129,35 @@ return function(Quiz)
             recent = { oldReceipt },
         },
     }
-    OrbitQuizDB = oldSave
-    Quiz.Main:OnEvent("ADDON_LOADED", Quiz.addonName)
+    OrbitGamesDB = {
+        schemaVersion = 1,
+        selectedGameType = Quiz.id,
+        minimap = {},
+        modes = { quiz = oldSave },
+    }
+    Games.Main:OnEvent("ADDON_LOADED", Games.addonName)
     Check(
-        Quiz.Main.initialized and Quiz.Store.db ~= oldSave,
+        Games.Main.initialized and Quiz.Store.db ~= oldSave,
         "existing progress reloads alongside the revised catalogue"
     )
-    Check(Quiz.Store.db == OrbitQuizDB, "reloaded progress remains bound to the persisted SavedVariables root")
+    Check(Quiz.Store.db == OrbitGamesDB.modes.quiz, "reloaded progress remains bound to the Quiz mode subtree")
     Check(Quiz.PersonalScores:GetPack(PACK_ID).score == 2, "removing comic questions never recalculates prior points")
     Check(Quiz.PersonalScores:GetPack(PACK_ID).versions[1] == 1, "prior pack-one history remains identified separately")
     Check(Quiz.Store.db.personalScores.schemaVersion == 2, "old personal progress upgrades to rule-aware storage")
     Check(oldSave.personalScores.schemaVersion == 1, "migration leaves the supplied historical personal schema intact")
     local settings = Quiz.Store:GetSettings()
     settings.packId = PACK_ID
-    Check(Quiz.Main:Start(settings), "the comic-free bundle hosts normally with existing pack-one progress")
-    local round = Quiz.Main.game.round
+    Check(Games.Main:Start(settings), "the comic-free bundle hosts normally with existing pack-one progress")
+    local round = Quiz.Controller.game.round
     Check(round.packVersion == PACK_VERSION, "the hosted question advertises the new content version")
-    Check(Quiz.Main:GetScore(Quiz.Identity.guid) == 0, "historical personal points do not seed the new hosted game")
+    Check(
+        Quiz.Controller:GetScore(Games.Identity.guid) == 0,
+        "historical personal points do not seed the new hosted game"
+    )
     Test.now = round.startedAt + 5
     Check(Quiz.Session:SubmitAnswer(round.correctIndex), "the revised bundle accepts a normal correct widget answer")
     Test.now = round.deadline
-    Quiz.Main:CloseQuestion(Test.now)
+    Quiz.Controller:CloseQuestion(Test.now)
     local progress = Quiz.PersonalScores:GetPack(PACK_ID)
     Check(progress.score == 4 and progress.answers == 2, "new game-lore points add to unchanged historical progress")
     Check(progress.version == PACK_VERSION, "personal metadata advances to the highest played content version")
@@ -162,7 +171,7 @@ return function(Quiz)
     Check(#scoreRows == 2, "new streak rules and original scores have separate display rows within the same pack")
     Check(scoreRows[1].archived and scoreRows[1].score == 2, "the original row retains its frozen historical score")
     Check(
-        not scoreRows[2].archived and scoreRows[2].score == 2 and scoreRows[2].rulesKey == Quiz.Main.game.rulesKey,
+        not scoreRows[2].archived and scoreRows[2].score == 2 and scoreRows[2].rulesKey == Quiz.Controller.game.rulesKey,
         "the current row contains only the new rules' first correct answer"
     )
     local stored, reason = Quiz.PersonalScores:RecordResult(oldReceipt)
@@ -172,7 +181,7 @@ return function(Quiz)
         rewrittenReceipt[key] = value
     end
     rewrittenReceipt.scoringVersion = Quiz.Scoring.VERSION
-    rewrittenReceipt.rulesKey = Quiz.Main.game.rulesKey
+    rewrittenReceipt.rulesKey = Quiz.Controller.game.rulesKey
     rewrittenReceipt.streak, rewrittenReceipt.streakBonus = 1, 0
     stored, reason = Quiz.PersonalScores:RecordResult(rewrittenReceipt)
     Check(
@@ -180,10 +189,10 @@ return function(Quiz)
         "retagging an old identity with current rules cannot replay historical points"
     )
     Check(Quiz.PersonalScores:GetPack(PACK_ID).score == 4, "replaying old content never re-awards its historical score")
-    Check(Quiz.Main:Stop(), "comic-free host stops normally after scoring")
-    Quiz.Main:CancelTicker()
-    Quiz.Main:OnEvent("ADDON_LOADED", Quiz.addonName)
-    Check(Quiz.Store.db == OrbitQuizDB, "mixed content-version progress remains persisted after a later reload")
+    Check(Games.Main:Stop(), "comic-free host stops normally after scoring")
+    Games.Main:CancelTicker()
+    Games.Main:OnEvent("ADDON_LOADED", Games.addonName)
+    Check(Quiz.Store.db == OrbitGamesDB.modes.quiz, "mixed content-version progress remains persisted after reload")
     progress = Quiz.PersonalScores:GetPack(PACK_ID)
     Check(
         progress.score == 4 and progress.versions[1] == 1 and progress.versions[2] == 1,

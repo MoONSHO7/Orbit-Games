@@ -1,0 +1,687 @@
+{
+  "schemaVersion": 4,
+  "design": "compact-rank-suit-v4",
+  "source": "https://github.com/hayeah/playing-cards-assets",
+  "sourceCommit": "1e4497c05c3da9956c9f517bd386e9a7090ff7fa",
+  "licenseSha256": "fe677a80c2b4ff84c482d46903cde46df6920636061e28779e9248a38b90b832",
+  "atlas": {
+    "file": "PlayingCards.png",
+    "width": 2048,
+    "height": 512,
+    "sha256": "4ddd389ce8a221c1342776b92b9b127522ee3711eb198e60626869180035e7b7"
+  },
+  "cell": {
+    "width": 128,
+    "height": 88,
+    "gapX": 16,
+    "gapY": 8
+  },
+  "rankTypography": {
+    "singleCharacterRanks": [
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7",
+      "8",
+      "9",
+      "J",
+      "Q",
+      "K",
+      "A"
+    ],
+    "singleCharacterHeight": 62,
+    "fitToWidthRanks": [
+      "10"
+    ],
+    "fitWidth": 60
+  },
+  "cards": [
+    {
+      "key": "2_clubs",
+      "cardId": 1,
+      "sources": [
+        "2_of_diamonds.png",
+        "2_of_clubs.png"
+      ],
+      "left": 96,
+      "top": 20,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "3_clubs",
+      "cardId": 2,
+      "sources": [
+        "3_of_diamonds.png",
+        "2_of_clubs.png"
+      ],
+      "left": 240,
+      "top": 20,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "4_clubs",
+      "cardId": 3,
+      "sources": [
+        "4_of_diamonds.png",
+        "2_of_clubs.png"
+      ],
+      "left": 384,
+      "top": 20,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "5_clubs",
+      "cardId": 4,
+      "sources": [
+        "5_of_diamonds.png",
+        "2_of_clubs.png"
+      ],
+      "left": 528,
+      "top": 20,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "6_clubs",
+      "cardId": 5,
+      "sources": [
+        "6_of_diamonds.png",
+        "2_of_clubs.png"
+      ],
+      "left": 672,
+      "top": 20,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "7_clubs",
+      "cardId": 6,
+      "sources": [
+        "7_of_diamonds.png",
+        "2_of_clubs.png"
+      ],
+      "left": 816,
+      "top": 20,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "8_clubs",
+      "cardId": 7,
+      "sources": [
+        "8_of_diamonds.png",
+        "2_of_clubs.png"
+      ],
+      "left": 960,
+      "top": 20,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "9_clubs",
+      "cardId": 8,
+      "sources": [
+        "9_of_diamonds.png",
+        "2_of_clubs.png"
+      ],
+      "left": 1104,
+      "top": 20,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "10_clubs",
+      "cardId": 9,
+      "sources": [
+        "10_of_diamonds.png",
+        "2_of_clubs.png"
+      ],
+      "left": 1248,
+      "top": 20,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "jack_clubs",
+      "cardId": 10,
+      "sources": [
+        "jack_of_diamonds.png",
+        "2_of_clubs.png"
+      ],
+      "left": 1392,
+      "top": 20,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "queen_clubs",
+      "cardId": 11,
+      "sources": [
+        "queen_of_diamonds.png",
+        "2_of_clubs.png"
+      ],
+      "left": 1536,
+      "top": 20,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "king_clubs",
+      "cardId": 12,
+      "sources": [
+        "king_of_diamonds.png",
+        "2_of_clubs.png"
+      ],
+      "left": 1680,
+      "top": 20,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "ace_clubs",
+      "cardId": 13,
+      "sources": [
+        "ace_of_diamonds.png",
+        "2_of_clubs.png"
+      ],
+      "left": 1824,
+      "top": 20,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "2_diamonds",
+      "cardId": 14,
+      "sources": [
+        "2_of_diamonds.png"
+      ],
+      "left": 96,
+      "top": 116,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "3_diamonds",
+      "cardId": 15,
+      "sources": [
+        "3_of_diamonds.png",
+        "2_of_diamonds.png"
+      ],
+      "left": 240,
+      "top": 116,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "4_diamonds",
+      "cardId": 16,
+      "sources": [
+        "4_of_diamonds.png",
+        "2_of_diamonds.png"
+      ],
+      "left": 384,
+      "top": 116,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "5_diamonds",
+      "cardId": 17,
+      "sources": [
+        "5_of_diamonds.png",
+        "2_of_diamonds.png"
+      ],
+      "left": 528,
+      "top": 116,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "6_diamonds",
+      "cardId": 18,
+      "sources": [
+        "6_of_diamonds.png",
+        "2_of_diamonds.png"
+      ],
+      "left": 672,
+      "top": 116,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "7_diamonds",
+      "cardId": 19,
+      "sources": [
+        "7_of_diamonds.png",
+        "2_of_diamonds.png"
+      ],
+      "left": 816,
+      "top": 116,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "8_diamonds",
+      "cardId": 20,
+      "sources": [
+        "8_of_diamonds.png",
+        "2_of_diamonds.png"
+      ],
+      "left": 960,
+      "top": 116,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "9_diamonds",
+      "cardId": 21,
+      "sources": [
+        "9_of_diamonds.png",
+        "2_of_diamonds.png"
+      ],
+      "left": 1104,
+      "top": 116,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "10_diamonds",
+      "cardId": 22,
+      "sources": [
+        "10_of_diamonds.png",
+        "2_of_diamonds.png"
+      ],
+      "left": 1248,
+      "top": 116,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "jack_diamonds",
+      "cardId": 23,
+      "sources": [
+        "jack_of_diamonds.png",
+        "2_of_diamonds.png"
+      ],
+      "left": 1392,
+      "top": 116,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "queen_diamonds",
+      "cardId": 24,
+      "sources": [
+        "queen_of_diamonds.png",
+        "2_of_diamonds.png"
+      ],
+      "left": 1536,
+      "top": 116,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "king_diamonds",
+      "cardId": 25,
+      "sources": [
+        "king_of_diamonds.png",
+        "2_of_diamonds.png"
+      ],
+      "left": 1680,
+      "top": 116,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "ace_diamonds",
+      "cardId": 26,
+      "sources": [
+        "ace_of_diamonds.png",
+        "2_of_diamonds.png"
+      ],
+      "left": 1824,
+      "top": 116,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "2_hearts",
+      "cardId": 27,
+      "sources": [
+        "2_of_diamonds.png",
+        "2_of_hearts.png"
+      ],
+      "left": 96,
+      "top": 212,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "3_hearts",
+      "cardId": 28,
+      "sources": [
+        "3_of_diamonds.png",
+        "2_of_hearts.png"
+      ],
+      "left": 240,
+      "top": 212,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "4_hearts",
+      "cardId": 29,
+      "sources": [
+        "4_of_diamonds.png",
+        "2_of_hearts.png"
+      ],
+      "left": 384,
+      "top": 212,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "5_hearts",
+      "cardId": 30,
+      "sources": [
+        "5_of_diamonds.png",
+        "2_of_hearts.png"
+      ],
+      "left": 528,
+      "top": 212,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "6_hearts",
+      "cardId": 31,
+      "sources": [
+        "6_of_diamonds.png",
+        "2_of_hearts.png"
+      ],
+      "left": 672,
+      "top": 212,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "7_hearts",
+      "cardId": 32,
+      "sources": [
+        "7_of_diamonds.png",
+        "2_of_hearts.png"
+      ],
+      "left": 816,
+      "top": 212,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "8_hearts",
+      "cardId": 33,
+      "sources": [
+        "8_of_diamonds.png",
+        "2_of_hearts.png"
+      ],
+      "left": 960,
+      "top": 212,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "9_hearts",
+      "cardId": 34,
+      "sources": [
+        "9_of_diamonds.png",
+        "2_of_hearts.png"
+      ],
+      "left": 1104,
+      "top": 212,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "10_hearts",
+      "cardId": 35,
+      "sources": [
+        "10_of_diamonds.png",
+        "2_of_hearts.png"
+      ],
+      "left": 1248,
+      "top": 212,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "jack_hearts",
+      "cardId": 36,
+      "sources": [
+        "jack_of_diamonds.png",
+        "2_of_hearts.png"
+      ],
+      "left": 1392,
+      "top": 212,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "queen_hearts",
+      "cardId": 37,
+      "sources": [
+        "queen_of_diamonds.png",
+        "2_of_hearts.png"
+      ],
+      "left": 1536,
+      "top": 212,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "king_hearts",
+      "cardId": 38,
+      "sources": [
+        "king_of_diamonds.png",
+        "2_of_hearts.png"
+      ],
+      "left": 1680,
+      "top": 212,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "ace_hearts",
+      "cardId": 39,
+      "sources": [
+        "ace_of_diamonds.png",
+        "2_of_hearts.png"
+      ],
+      "left": 1824,
+      "top": 212,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "2_spades",
+      "cardId": 40,
+      "sources": [
+        "2_of_diamonds.png",
+        "2_of_spades.png"
+      ],
+      "left": 96,
+      "top": 308,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "3_spades",
+      "cardId": 41,
+      "sources": [
+        "3_of_diamonds.png",
+        "2_of_spades.png"
+      ],
+      "left": 240,
+      "top": 308,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "4_spades",
+      "cardId": 42,
+      "sources": [
+        "4_of_diamonds.png",
+        "2_of_spades.png"
+      ],
+      "left": 384,
+      "top": 308,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "5_spades",
+      "cardId": 43,
+      "sources": [
+        "5_of_diamonds.png",
+        "2_of_spades.png"
+      ],
+      "left": 528,
+      "top": 308,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "6_spades",
+      "cardId": 44,
+      "sources": [
+        "6_of_diamonds.png",
+        "2_of_spades.png"
+      ],
+      "left": 672,
+      "top": 308,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "7_spades",
+      "cardId": 45,
+      "sources": [
+        "7_of_diamonds.png",
+        "2_of_spades.png"
+      ],
+      "left": 816,
+      "top": 308,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "8_spades",
+      "cardId": 46,
+      "sources": [
+        "8_of_diamonds.png",
+        "2_of_spades.png"
+      ],
+      "left": 960,
+      "top": 308,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "9_spades",
+      "cardId": 47,
+      "sources": [
+        "9_of_diamonds.png",
+        "2_of_spades.png"
+      ],
+      "left": 1104,
+      "top": 308,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "10_spades",
+      "cardId": 48,
+      "sources": [
+        "10_of_diamonds.png",
+        "2_of_spades.png"
+      ],
+      "left": 1248,
+      "top": 308,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "jack_spades",
+      "cardId": 49,
+      "sources": [
+        "jack_of_diamonds.png",
+        "2_of_spades.png"
+      ],
+      "left": 1392,
+      "top": 308,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "queen_spades",
+      "cardId": 50,
+      "sources": [
+        "queen_of_diamonds.png",
+        "2_of_spades.png"
+      ],
+      "left": 1536,
+      "top": 308,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "king_spades",
+      "cardId": 51,
+      "sources": [
+        "king_of_diamonds.png",
+        "2_of_spades.png"
+      ],
+      "left": 1680,
+      "top": 308,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "ace_spades",
+      "cardId": 52,
+      "sources": [
+        "ace_of_diamonds.png",
+        "2_of_spades.png"
+      ],
+      "left": 1824,
+      "top": 308,
+      "width": 128,
+      "height": 88
+    },
+    {
+      "key": "back",
+      "cardId": "back",
+      "sources": [
+        "back@2x.png"
+      ],
+      "left": 96,
+      "top": 404,
+      "width": 128,
+      "height": 88
+    }
+  ],
+  "decorations": [
+    {
+      "key": "dealer_chip",
+      "provenance": "Orbit-Games project-generated Pillow primitives",
+      "left": 272,
+      "top": 416,
+      "width": 64,
+      "height": 64,
+      "sha256": "cd100b789cc4c41fd109fe1ec6e03614f69f52a3ee73c1c9259c301b6975687f"
+    }
+  ]
+}

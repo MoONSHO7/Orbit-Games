@@ -6,22 +6,22 @@ local EPSILON = 0.000001
 local TOAST_SECONDS = 3.2
 local BURST_DROP_PIXELS = 4
 local BURST_SCALE = 0.8
-local CAPTION_PULSE_STREAK = 10
 local DISPLAY_MODES = { { 1920, 1080, 0.71 }, { 1601, 901, 0.83 }, { 800, 600, 1.25 }, { 480, 320, 0.71 } }
 local ANCHOR_COORDINATES = { 0.1, 0.5, 0.9 }
 local SOUND_FILES = {
-    [5] = "dominating.mp3",
-    [6] = "ownage.mp3",
-    [7] = "rampage.mp3",
-    [8] = "wicked-sick.mp3",
-    [9] = "holyshit.mp3",
-    [10] = "godlike.mp3",
+    [5] = "Playback\\dominating-100.ogg",
+    [6] = "Playback\\ownage-100.ogg",
+    [7] = "Playback\\rampage-100.ogg",
+    [8] = "Playback\\wicked-sick-100.ogg",
+    [9] = "Playback\\holyshit-100.ogg",
+    [10] = "Playback\\godlike-100.ogg",
 }
 local GEOMETRY_CALLS = { "setPointCalls", "clearPointCalls", "sizeCalls", "stringHeightMeasurements" }
 
-return function(Quiz)
+return function(Games)
+    local Quiz = Games.Quiz
     local assertions = 0
-    local Main, Session, Widget, Toasts = Quiz.Main, Quiz.Session, Quiz.Widget, Quiz.StreakToasts
+    local Main, Session, Widget, Toasts = Games.Main, Quiz.Session, Quiz.Widget, Quiz.StreakToasts
     local rules = assert(Quiz.Rules.Normalize({ streakBonusPerCorrect = 0, streakBonusMax = 0 }))
     local rulesKey = Quiz.Rules.Encode(rules)
     local function Check(value, message)
@@ -44,7 +44,6 @@ return function(Quiz)
     local function Hidden(message)
         Same(Toasts.frame:IsShown(), false, message)
         Same(Toasts.animation:IsPlaying(), false, message .. " has no animation")
-        Same(Toasts.captionAnimation:IsPlaying(), false, message .. " has no caption pulse")
         Same(Toasts.soundHandle, nil, message .. " has no owned voice")
         Same(Toasts.queueCount, 0, message .. " has no queued voice")
     end
@@ -141,7 +140,7 @@ return function(Quiz)
         for _, label in ipairs({ Toasts.nameText, Toasts.captionText }) do
             local pixel = PixelUtil.GetPixelToUIUnitFactor() / label:GetEffectiveScale()
             local x, y = label:GetShadowOffset()
-            Near(x / pixel, -2, "toast shadow stays two physical pixels left")
+            Near(x / pixel, 2, "toast shadow stays two physical pixels right")
             Near(y / pixel, -2, "toast shadow stays two physical pixels down")
             Same(label.fontCalls, nil, "toast inherits its font without an inline file override")
             Check(label:GetBottom() >= Toasts.frame:GetBottom() - EPSILON, "toast label fits its footer")
@@ -150,7 +149,7 @@ return function(Quiz)
     end
 
     Check(
-        Quiz:RegisterQuestionPack({
+        Quiz:RegisterPack({
             id = PACK_ID,
             title = "Streak toast integration",
             version = 1,
@@ -173,7 +172,7 @@ return function(Quiz)
     Hidden("new game has no unsolicited toast")
     local originalAppearance, originalPosition = Quiz.Store:GetWidgetSettings(), Copy(Widget.position)
     local originalDisplay = { Test.physicalWidth, Test.physicalHeight, UIParent:GetScale() }
-    local initialRound, initialSounds = Main.game.round, #Test.soundCalls
+    local initialRound, initialSounds = Quiz.Controller.game.round, #Test.soundCalls
     for _, display in ipairs(DISPLAY_MODES) do
         Test.physicalWidth, Test.physicalHeight = display[1], display[2]
         UIParent:SetScale(display[3])
@@ -199,13 +198,16 @@ return function(Quiz)
     Check(Quiz.Store:SaveWidgetSettings(originalAppearance), "geometry fixture restores the user's appearance")
     Widget:ApplySettings()
     Widget:OnDisplayChanged()
-    Same(Main.game.round, initialRound, "burst geometry checks leave the actual question unchanged")
+    Same(Quiz.Controller.game.round, initialRound, "burst geometry checks leave the actual question unchanged")
     Same(#Test.soundCalls, initialSounds, "burst geometry changes never manufacture streak audio")
     for streak = 1, 11 do
-        local round = Main.game.round
-        Same(Main.game.state, "open", "automatic progression opens the next question")
+        local round = Quiz.Controller.game.round
+        Same(Quiz.Controller.game.state, "open", "automatic progression opens the next question")
         Test.now = round.startedAt + 1
-        Check(Main:AcceptAnswer(PEER, nil, round.id, round.correctIndex), "other player answers through the host")
+        Check(
+            Quiz.Controller:AcceptAnswer(PEER, nil, round.id, round.correctIndex),
+            "other player answers through the host"
+        )
         if streak <= 5 then
             Check(Session:SubmitAnswer(round.correctIndex), "local host answers through the widget route")
         elseif streak == 6 then
@@ -214,7 +216,7 @@ return function(Quiz)
         local sounds, snapshot = #Test.soundCalls, Snapshot()
         Hidden("answer selection never announces an unconfirmed streak")
         Test.Advance(round.deadline - Test.now)
-        local result, view = Main.game.lastResult, Main:GetHostView()
+        local result, view = Quiz.Controller.game.lastResult, Quiz.Controller:GetHostView()
         Same(view.streakMilestones, result.streakMilestones, "host view exposes the committed group milestones")
         Stable(snapshot)
         if streak < 5 then
@@ -224,7 +226,7 @@ return function(Quiz)
             Same(#result.streakMilestones, streak == 5 and 2 or 1, "all qualifying players enter the result")
             Same(Toasts.nameText:GetText(), PEER, "host sees the other player's confirmed streak")
             Same(Toasts.active.streak, streak, "toast displays the actual consecutive count")
-            Same(Toasts.captionAnimation:IsPlaying(), streak >= CAPTION_PULSE_STREAK, "live streak pulses begin at ten")
+            Same(Toasts.captionAnimation, nil, "live streak captions remain fixed at every tier")
             Same(
                 Toasts.captionText:GetText(),
                 tostring(streak) .. " in a row",
@@ -232,7 +234,7 @@ return function(Quiz)
             )
             Same(
                 Test.soundCalls[#Test.soundCalls].path,
-                Quiz.Media:GetStreakSound(streak),
+                Quiz.SoundMedia:GetStreakSound(streak),
                 "confirmed count selects its bundled voice"
             )
             Check(
@@ -245,19 +247,13 @@ return function(Quiz)
             else
                 Same(view.streak, 0, "local wrong or unanswered streak does not suppress another player")
             end
-            local pulsePlays = Toasts.captionAnimation.playCalls
             for _ = 1, 4 do
                 Widget:Refresh()
             end
             Same(#Test.soundCalls, sounds + 1, "repeated fresh host views never replay their result")
-            Same(
-                Toasts.captionAnimation.playCalls,
-                pulsePlays,
-                "repeated fresh host views never replay the caption pulse"
-            )
         end
         local first = Toasts.active
-        Test.Advance(Main.nextAutoAt - Test.now)
+        Test.Advance(Quiz.Controller.nextAutoAt - Test.now)
         Same(Toasts.active, first, "opening the next question retains active toast playback")
         Drain()
         local played = #Test.soundCalls
@@ -276,10 +272,10 @@ return function(Quiz)
     Hidden("stopping clears announcements")
 
     Check(Session:JoinHost(HOST, SESSION_ID), "participant joins a different quiz")
-    Session:Receive(HOST, { "W", Session.client.request, SESSION_ID, "Toast test", "0.0" })
+    Session:Receive(HOST, { "W", Session.client.request, SESSION_ID, "0.0" })
     Main:CancelTicker()
     local function Question(id)
-        Quiz.Comms:Clear()
+        Games.Comms:Clear()
         Session:Receive(HOST, {
             "Q",
             SESSION_ID,
@@ -390,7 +386,7 @@ return function(Quiz)
     suppressed.suppressStreakToasts = nil
     Widget:Refresh()
     Same(#Test.soundCalls, sounds, "clearing a catch-up flag cannot replay a suppressed result")
-    for _, cancel in ipairs({
+    for _, preserve in ipairs({
         {
             "paused game",
             function()
@@ -405,6 +401,28 @@ return function(Quiz)
                 Widget:Refresh()
             end,
         },
+        {
+            "next-question packet wait",
+            function()
+                Session.view.state = "waiting"
+                Widget:Refresh()
+            end,
+        },
+    }) do
+        local fixture = Fixture({ { name = PEER, streak = 10 }, { name = HOST, streak = 5 } })
+        local activeToast, activeHandle = Toasts.active, Toasts.soundHandle
+        local pending, stops = Toasts.queueCount, #Test.stoppedSounds
+        preserve[2]()
+        Same(Toasts.active, activeToast, preserve[1] .. " preserves the current announcement")
+        Same(Toasts.soundHandle, activeHandle, preserve[1] .. " preserves the current native voice")
+        Same(Toasts.queueCount, pending, preserve[1] .. " preserves queued announcements")
+        Same(#Test.stoppedSounds, stops, preserve[1] .. " never calls StopSound")
+        Session.restricted, fixture.state = false, "results"
+        Widget:Refresh()
+        Drain()
+        Same(#Test.stoppedSounds, stops, preserve[1] .. " lets every retained voice finish naturally")
+    end
+    for _, cancel in ipairs({
         {
             "hidden widget",
             function()
@@ -459,6 +477,30 @@ return function(Quiz)
     Check(Session:Leave(), "player may leave the current game")
     Widget:Refresh()
     Hidden("leaving clears all session-specific playback")
+    Check(Session:JoinHost(HOST, SESSION_ID), "participant rejoins for natural completion coverage")
+    Session:Receive(HOST, { "W", Session.client.request, SESSION_ID, "0.0" })
+    Main:CancelTicker()
+    Test.soundDuration = TOAST_SECONDS + 2
+    local final = Fixture({ { name = PEER, streak = 10 }, { name = HOST, streak = 5 } })
+    Test.soundDuration = nil
+    local finalToast, finalHandle = Toasts.active, Toasts.soundHandle
+    local finalStops = #Test.stoppedSounds
+    Session:Receive(HOST, { "X", SESSION_ID })
+    Widget:Refresh()
+    Same(Session.client, nil, "host completion releases participant membership")
+    Same(Toasts.active, finalToast, "host completion retains its current result toast")
+    Same(Toasts.soundHandle, finalHandle, "host completion retains its unfinished native voice")
+    Same(Toasts.queueCount, 1, "host completion retains simultaneous result announcements")
+    Same(Widget.frame:IsShown(), true, "HUD remains for the natural final-toast tail")
+    Same(#Test.stoppedSounds, finalStops, "host completion never calls StopSound")
+    Test.AdvanceAnimations(TOAST_SECONDS + EPSILON)
+    Check(Toasts.frame:GetScript("OnUpdate"), "final native audio may outlive its visual fade")
+    Test.AdvanceAudio(2.1)
+    Toasts.frame:GetScript("OnUpdate")(Toasts.frame, 2.1)
+    Same(Toasts.active.name, HOST, "queued final announcement begins after native completion")
+    Test.AdvanceAnimations(TOAST_SECONDS + EPSILON)
+    Hidden("naturally completed final announcements release the HUD")
+    Same(#Test.stoppedSounds, finalStops, "every final voice completes without forced cancellation")
     Widget:SetEditing(true)
     Hidden("opening the idle placement preview cannot replay an old streak")
     Widget:SetEditing(false)

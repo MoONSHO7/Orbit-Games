@@ -1,4 +1,5 @@
-return function(Quiz)
+return function(Games)
+    local Quiz = Games.Quiz
     local assertions = 0
     local Personal, Store = Quiz.PersonalScores, Quiz.Store
     local defaultRules = Quiz.Rules.Normalize()
@@ -76,7 +77,7 @@ return function(Quiz)
     local function NewStore(saved)
         local db, reason = Store:Initialize(saved)
         Check(db ~= nil, tostring(reason))
-        Same(db.schemaVersion, 6, "schema upgrades to per-pack personal scores")
+        Same(db.schemaVersion, 7, "schema upgrades to the current Quiz mode version")
         Same(Personal.data, db.personalScores, "personal owner binds to the committed database")
         return db
     end
@@ -195,14 +196,14 @@ return function(Quiz)
     Same(Personal:GetPack("warcraft-lore").score, 13.5, "normalized non-ASCII native host identities work")
 
     db = NewStore(nil)
-    local originalGuid, originalName = Quiz.Identity.guid, Quiz.Identity.name
-    Quiz.Identity.guid, Quiz.Identity.name = "Player-1-FirstAlt", "Firstalt-TestRealm"
+    local originalGuid, originalName = Games.Identity.guid, Games.Identity.name
+    Games.Identity.guid, Games.Identity.name = "Player-1-FirstAlt", "Firstalt-TestRealm"
     Recorded(Receipt(1))
-    Quiz.Identity.guid, Quiz.Identity.name = "Player-1-SecondAlt", "Secondalt-TestRealm"
+    Games.Identity.guid, Games.Identity.name = "Player-1-SecondAlt", "Secondalt-TestRealm"
     NewStore(Copy(db))
     Recorded(Receipt(2))
     Same(Personal:GetPack("warcraft-lore").answers, 2, "local characters share account-wide personal pack progress")
-    Quiz.Identity.guid, Quiz.Identity.name = originalGuid, originalName
+    Games.Identity.guid, Games.Identity.name = originalGuid, originalName
 
     db = NewStore(nil)
     for _, id in ipairs({ 10, 8, 9, 1, 3, 2, 4, 7, 6, 5 }) do
@@ -391,9 +392,17 @@ return function(Quiz)
     Same(Personal:GetPack("warcraft-lore").score, 1.9, "validated final-tick penalty retains half-point cost")
     Recorded(Receipt(3, { selected = 2, elapsed = 0 }))
     Recorded(Receipt(4, { selected = 2, elapsed = 0 }))
-    Same(Personal:GetPack("warcraft-lore").score, -0.1, "negative lifetime totals remain negative")
+    pack = Personal:GetPack("warcraft-lore")
+    Same(pack.score, 0, "negative lifetime balances present as zero")
+    Same(pack.rulesets[defaultRulesKey].score, 0, "exact ruleset projections use the same zero floor")
+    Same(pack.scoringVersions[3].score, 0, "current scoring-version projections use the same zero floor")
+    Same(
+        db.personalScores.packs["warcraft-lore"].rulesets[defaultRulesKey].score,
+        -0.1,
+        "the signed balance retains penalties that must be recovered"
+    )
     NewStore(Copy(Store.db))
-    Same(Personal:GetPack("warcraft-lore").score, -0.1, "negative lifetime totals survive reload")
+    Same(Personal:GetPack("warcraft-lore").score, 0, "the zero floor survives reload")
 
     db = NewStore(nil)
     local lastSafeRound = 9007199254740990
@@ -464,7 +473,7 @@ return function(Quiz)
         local before = Copy(archive)
         db = NewStore(archive)
         SameTable(archive, before, "migration never mutates source schema " .. version)
-        Same(db.settings.league, "Old Game", "migration preserves host display settings")
+        Same(db.settings.packId, "warcraft-lore", "migration preserves the selected pack")
         Same(db.widgetPosition.x, 0.23, "migration preserves saved widget position")
         Same(db.widgetSettings.scale, 135, "migration preserves live scale preference")
         Same(db.widgetSettings.font, "Custom Font", "migration preserves saved font preference")
@@ -498,7 +507,7 @@ return function(Quiz)
     Same(leagues[3], "Zebra", "archive names sort independently of current host game")
     leagues[1] = "mutated"
     Same(Store:GetArchivedLeagues()[1], "Alpha", "archive name lists are detached")
-    RejectDatabase({ schemaVersion = 7 }, "unsupported_database_version")
+    RejectDatabase({ schemaVersion = 8 }, "unsupported_database_version")
 
     local legacyStats = { score = -0.6, correct = 1, incorrect = 3, answers = 4, unanswered = 0, rounds = 4 }
     local historical = {
@@ -577,7 +586,9 @@ return function(Quiz)
         "v2 personal stats remain exact"
     )
     Same(next(db.personalScores.packs["warcraft-lore"].rulesets), nil, "old results are not guessed into new rules")
-    Same(Personal:GetPack("warcraft-lore").score, -0.6, "negative historical progress is not floored or reset")
+    pack = Personal:GetPack("warcraft-lore")
+    Same(pack.score, 0, "negative historical progress presents at the zero floor")
+    Same(pack.scoringVersions[2].score, 0, "historical score projections also respect the zero floor")
     local scoreRows = Personal:GetScoreRows()
     Same(#scoreRows, 1, "an old pack produces one historical row")
     Same(scoreRows[1].archived, true, "old personal stats have explicit historical identity")
@@ -590,13 +601,13 @@ return function(Quiz)
     Same(Personal:GetPack("warcraft-lore").score, 1.8, "the compatibility summary retains both eras of progress")
     scoreRows = Personal:GetScoreRows()
     Same(#scoreRows, 2, "historical and new rule scores are never combined for display")
-    Same(scoreRows[1].score, -0.6, "historical display row retains the original penalty total")
+    Same(scoreRows[1].score, 0, "historical display row floors the original penalty total")
     Same(scoreRows[2].score, 2.4, "new rule display row contains only comparable points")
     Same(scoreRows[2].archived, false, "new rule rows are distinct from archives")
     Same(scoreRows[2].rulesKey, defaultRulesKey, "new rule row identifies its exact rules")
     Same(scoreRows[2].rules.answerSeconds, 15, "row exposes detached rule metadata for presentation")
     scoreRows[1].score, scoreRows[2].score, scoreRows[2].rules.answerSeconds = 999, 999, 120
-    Same(Personal:GetScoreRows()[1].score, -0.6, "mutating old row copies cannot change saved scores")
+    Same(Personal:GetScoreRows()[1].score, 0, "mutating old row copies cannot change floored score projections")
     Same(Personal:GetScoreRows()[2].rules.answerSeconds, 15, "row rule metadata is detached")
     db = NewStore(Copy(db))
     SameTable(db.personalScores.packs["warcraft-lore"].scoringVersions[2], legacyStats, "later reload keeps old totals")

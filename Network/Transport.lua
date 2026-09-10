@@ -1,7 +1,8 @@
-local _, Quiz = ...
-local PREFIX = "ORBITQUIZ8"
+local _, Games = ...
+local PREFIX = "ORBITGAMES1"
 local VERSION = "1"
-local MAX_FIELDS = 32
+local MAX_PAYLOAD_FIELDS = 32
+local MAX_FIELDS = MAX_PAYLOAD_FIELDS + 2
 local MAX_MESSAGE_BYTES = 4096
 local MAX_PACKET_BYTES = 255
 local MAX_FRAGMENT_BYTES = 200
@@ -22,12 +23,20 @@ local MAX_RETRY_DELAY = 2
 local EPOCH_RANGE = 16777216
 local MAX_SEQUENCE = 2147483647
 local KEY_SEPARATOR = "\031"
+local MAX_GAME_TYPE_BYTES = 32
 
 local Comms = { initialized = false, suspended = false, sequence = 0, revision = 0 }
-Quiz.Comms = Comms
+Games.Comms = Comms
 
 local function IsBlocked(self)
     return self.suspended or C_ChatInfo.InChatMessagingLockdown()
+end
+
+local function IsGameTypeId(value)
+    return type(value) == "string"
+        and #value > 0
+        and #value <= MAX_GAME_TYPE_BYTES
+        and value:match("^[a-z0-9][a-z0-9_-]*$") ~= nil
 end
 
 local function Encode(fields)
@@ -212,21 +221,35 @@ function Comms:Initialize(onMessage, onError)
     return true
 end
 
-function Comms:Send(target, fields, tag)
+function Comms:Send(target, gameTypeId, fields, tag)
     if not self.initialized then
         return false, "send_failed"
     end
     if IsBlocked(self) then
         return false, "addon_lockdown"
     end
-    target = Quiz.Identity:NormalizeName(target)
+    target = Games.Identity:NormalizeName(target)
     if not target then
         return false, "invalid_target"
     end
-    if issecretvalue(tag) then
+    if issecretvalue(tag) or issecretvalue(gameTypeId) or not IsGameTypeId(gameTypeId) then
         return false, "codec_invalid"
     end
-    local encoded, reason = Encode(fields)
+    local gameType = Games.GameTypes:Get(gameTypeId)
+    if not gameType then
+        return false, "codec_invalid"
+    end
+    if issecretvalue(fields) or type(fields) ~= "table" or getmetatable(fields) ~= nil then
+        return false, "codec_invalid"
+    end
+    local envelope = { gameTypeId, tostring(gameType.protocolVersion) }
+    for key, value in pairs(fields) do
+        if type(key) ~= "number" or key < 1 or key > MAX_PAYLOAD_FIELDS or key ~= math.floor(key) then
+            return false, "codec_invalid"
+        end
+        envelope[key + 2] = value
+    end
+    local encoded, reason = Encode(envelope)
     if not encoded then
         return false, reason
     end
@@ -259,6 +282,7 @@ function Comms:Send(target, fields, tag)
         attempts = 0,
         nextAttemptAt = 0,
         expiresAt = GetTime() + MESSAGE_TTL,
+        gameTypeId = gameTypeId,
         tag = tag,
     }
     self.queueCount = self.queueCount + count
@@ -290,7 +314,7 @@ end
 
 function Comms:IsBusy(target)
     if target ~= nil then
-        local name = Quiz.Identity:NormalizeName(target)
+        local name = Games.Identity:NormalizeName(target)
         return name ~= nil and self.queueTargets[name] ~= nil
     end
     return self.queueCount > 0
@@ -313,17 +337,18 @@ function Comms:Tick(now)
     self.ticking = true
     ExpireInbound(self, now)
     local failures, failedTargets = {}, {}
-    local function Failure(target, reason)
-        if not failedTargets[target] then
-            failedTargets[target] = true
-            failures[#failures + 1] = { target = target, reason = reason }
+    local function Failure(target, gameTypeId, reason)
+        local key = target .. KEY_SEPARATOR .. gameTypeId
+        if not failedTargets[key] then
+            failedTargets[key] = true
+            failures[#failures + 1] = { target = target, gameTypeId = gameTypeId, reason = reason }
         end
     end
     local expired = false
     for index = self.queueHead, self.queueTail do
         local message = self.queue[index]
         if message and now >= message.expiresAt then
-            Failure(message.target, "send_failed")
+            Failure(message.target, message.gameTypeId, "send_failed")
             RemoveMessage(self, index)
             expired = true
         end
@@ -350,7 +375,6 @@ function Comms:Tick(now)
             not issecretvalue(result)
             and (result == Enum.SendAddonMessageResult.Success or result == Enum.SendAddonMessageResult.ChannelThrottle)
         then
-            -- ChannelThrottle can accompany an already-submitted packet; application acknowledgements decide delivery.
             self.queueCount = self.queueCount - 1
             message.part = message.part + 1
             message.attempts = 0
@@ -361,7 +385,7 @@ function Comms:Tick(now)
         elseif not issecretvalue(result) and result == Enum.SendAddonMessageResult.AddonMessageThrottle then
             message.attempts = message.attempts + 1
             if message.attempts >= MAX_SEND_ATTEMPTS then
-                Failure(message.target, "send_failed")
+                Failure(message.target, message.gameTypeId, "send_failed")
                 RemoveMessage(self, self.queueHead)
                 self.queueHead = self.queueHead + 1
             else
@@ -376,7 +400,7 @@ function Comms:Tick(now)
             elseif not issecretvalue(result) and result == Enum.SendAddonMessageResult.TargetOffline then
                 reason = "target_offline"
             end
-            Failure(message.target, reason)
+            Failure(message.target, message.gameTypeId, reason)
             RemoveMessage(self, self.queueHead)
             self.queueHead = self.queueHead + 1
         end
@@ -388,7 +412,7 @@ function Comms:Tick(now)
         if self.revision ~= revision then
             break
         end
-        self.onError(failure.target, failure.reason)
+        self.onError(failure.target, failure.gameTypeId, failure.reason)
     end
     self.ticking = false
 end
@@ -408,7 +432,7 @@ function Comms:Receive(prefix, text, channel, sender)
     then
         return false
     end
-    sender = Quiz.Identity:NormalizeName(sender)
+    sender = Games.Identity:NormalizeName(sender)
     if not sender then
         return false
     end
@@ -466,10 +490,21 @@ function Comms:Receive(prefix, text, channel, sender)
         RemoveAssembly(self, peer, id)
         Remember(self, peer, id, now)
         local fields = Decode(encoded)
-        if not fields then
+        local gameTypeId = fields and fields[1]
+        local gameType = gameTypeId and Games.GameTypes:Get(gameTypeId)
+        if
+            not fields
+            or not IsGameTypeId(gameTypeId)
+            or not gameType
+            or fields[2] ~= tostring(gameType.protocolVersion)
+        then
             return false
         end
-        self.onMessage(sender, fields)
+        local payload = {}
+        for index = 3, #fields do
+            payload[index - 2] = fields[index]
+        end
+        self.onMessage(sender, gameTypeId, payload)
     end
     return true
 end

@@ -2,34 +2,37 @@
 
 ## Description
 
-Startup declarations, application text, and coordination of the standalone quiz.
+Startup declarations, game-type registration, application text and coordination for Orbit-Games.
 
 ## Purpose
 
-Keep WoW events and user commands at the application boundary while game rules, network state, storage and UI retain their own owners.
+Keep WoW events and user commands at the application boundary while each registered game type owns its rules, session payloads, saved mode state and renderer.
 
 ## Implementation
 
-`Init.lua` establishes the shared addon namespace, public `OrbitQuiz` registration entry point, constants and source version. `Locale.lua` supplies the shared/runtime/widget strings and localized pack-registration diagnostics before consumers capture them; Spanish-Mexico and British-English diagnostics retain their existing locale aliases.
+`Init.lua` establishes the shared `Games` namespace, exports `OrbitGames` and declares the source version. `Core/GameTypes.lua` owns descriptor registration and the selected default, including each mode's Results title/presenter contract. Cards and Quiz register complete descriptors; Quiz remains the explicit default and companion packs use only `OrbitGames.Quiz:RegisterPack`.
 
-`Runtime.lua` owns `Quiz.Main`: `ADDON_LOADED` binds SavedVariables and communication callbacks; `PLAYER_LOGIN` starts discovery and the ticker. Slash commands and UI actions enter the same host lifecycle. The ticker advances readiness, author-defined answer/reveal deadlines, transport retries and interruption recovery.
+`Locale.lua` supplies only shared shell text and errors. Each descriptor exposes its own locale table; Cards and Quiz keep player-facing domain language inside their mode directories.
 
-Host closure takes results from the game, records personal receipts, and queues participant receipts before revealing. `GetHostView` exposes committed group streak milestones alongside personal feedback; UI never derives awards from a click. Finite quizzes finish after their final reveal. Runtime supplies the media-change callback to `UI/Media.lua`, refreshing appearance only after successful initialization.
+`Runtime.lua` owns application lifecycle and mode dispatch. `ADDON_LOADED` validates `OrbitGamesDB`, initializes shared communication and registers the minimap launcher. SharedMedia registration reapplies appearance to every created mode HUD so inactive fallback fonts can recover before the next mode switch. The packaged compatibility loader runs afterward and imports `OrbitQuizDB` through the generic mode-import boundary. `PLAYER_LOGIN` starts discovery and the ticker. `ENCOUNTER_STATE_CHANGED` re-queries `C_InstanceEncounter.IsEncounterInProgress`; Runtime combines that boss state with chat availability into one automatic-wait transition for the active mode. The launcher and `/og` or `/orbitgames` commands share the same initialization gate. Commands perform actions or navigate the addon UI: `status` and unknown commands open Games, while mode aliases choose Host or Results. Reports update controller/setup notices and never write to the visible chat frame.
+
+The selected game type receives host, join, tick, view and command work. Browser joins pass the complete discovery advert to the selected session so it can validate its activity contract. Quiz records score receipts; Cards projects recipient-safe table state and records completed settlements. Shared UI and networking derive neither.
 
 ## Gotchas
 
-- A live game snapshots its pack's rules. Setup changes cannot change an active game's timing, scoring, selections or results.
-- Manual Pause voids an unfinished question and remains paused. Communication restrictions automatically pause and resume fresh; completed finite games retry the final receipt and restart the reveal interval after recovery.
-- A failed local personal-score write must not prevent other participants' completed receipts being queued. Expected storage failure then pauses hosting; unexpected errors reach WoW's error handler/BugSack.
+- The selected game type and its normalized setup are immutable for a live session.
+- Automatic waiting is boss-encounter-specific, not ordinary combat. Manual pause ownership always survives automatic blockers, and recovery waits until both the encounter and any chat restriction have ended.
+- The `Orbit-Quiz` compatibility addon is a loader/migration shim, not a second runtime. Never initialize both the former full addon and Orbit-Games.
 - Logout/reload end membership and cancel the ticker. Discovery remains available between games, not after logout.
-- Media initialization can notify synchronously and repeat after another addon loads. Bind the callback before registration and retain the application's initialized gate; the font catalogue must not know about setup or HUD owners.
-- Release automation stamps `App/Init.lua` only in its runner checkout. The TOC's `@project-version@` and runtime version must agree in the packaged addon.
+- Media initialization may notify synchronously and again after another addon loads; bind callbacks before registration.
+- There is no chat-output fallback for status, help or errors. Keep actionable failures in the shared notice lane and command feedback in the page or HUD that owns it.
+- Release automation stamps `Games.version` only in its runner checkout. The TOC and runtime version must agree in the package.
 
 ## Secrets
 
-WoW restriction events and native addon/error arguments are checked before comparison or parsing. Runtime coordinates chat-lockdown suspension; it does not handle secret unit-health/power data.
+WoW restriction events and native addon/error arguments are checked before comparison or parsing. Runtime coordinates chat-lockdown suspension; modes do not receive unchecked native payloads.
 
 ## References
 
-- [Gameplay](../Game/README.md), [networking](../Network/README.md), [persistence](../Data/README.md), and [UI](../UI/README.md).
+- [Cards](../Modes/Cards/README.md), [Quiz](../Modes/Quiz/README.md), [networking](../Network/README.md), [persistence](../Data/README.md) and [UI](../UI/README.md).
 - [Offline checks](../Dev/Tests/README.md) and [release workflows](../.github/workflows/README.md).

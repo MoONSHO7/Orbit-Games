@@ -1,11 +1,14 @@
 local SERVER_EPOCH = 1788048000
+local MINIMAP_SIZE = 198
+local UINT32_RANGE = 4294967296
+local INT32_SIGN = 2147483648
 local SOUND_DURATIONS = {
-    dominating = 1.700091,
-    ownage = 2.586122,
-    rampage = 1.959184,
-    ["wicked-sick"] = 2.586122,
-    holyshit = 2.241859,
-    godlike = 1.744490,
+    dominating = 1.880091,
+    ownage = 2.766122,
+    rampage = 2.139184,
+    ["wicked-sick"] = 2.766122,
+    holyshit = 2.421859,
+    godlike = 2.044490,
 }
 
 Test = {
@@ -24,6 +27,7 @@ Test = {
     fontStringCreations = 0,
     fontObjectCreations = 0,
     textureCreations = 0,
+    lineCreations = 0,
     maskCreations = 0,
     fontWidths = {},
     invalidFonts = {},
@@ -42,37 +46,69 @@ Test = {
     physicalHeight = 768,
     mouseButtons = {},
     restricted = false,
+    encounter = false,
     guild = true,
     group = false,
     raid = true,
     instance = true,
     lobbyId = 8,
-    lobbyName = "OrbitQuizLobby",
+    lobbyName = "OrbitGamesLobby",
     lobbyJoined = false,
     lobbyType = 3,
     channelId = 7,
-    channelName = "OrbitQuiz",
+    channelName = "OrbitGames",
     hostGUID = "Player-0-HOST",
     hostName = "Quizhost",
     realm = "TestRealm",
 }
 
 strmatch = string.match
+WOW_PROJECT_MAINLINE = 1
+WOW_PROJECT_ID = WOW_PROJECT_MAINLINE
 
 function securecallfunction(callback, ...)
     return callback(...)
 end
 
+local function ToSignedUInt32(value)
+    value = value % UINT32_RANGE
+    return value >= INT32_SIGN and value - UINT32_RANGE or value
+end
+
+local function Bitwise(first, second, include)
+    first, second = first % UINT32_RANGE, second % UINT32_RANGE
+    local value, place = 0, 1
+    for _ = 1, 32 do
+        local firstBit, secondBit = first % 2, second % 2
+        if include(firstBit, secondBit) then
+            value = value + place
+        end
+        first, second, place = math.floor(first / 2), math.floor(second / 2), place * 2
+    end
+    return ToSignedUInt32(value)
+end
+
 bit = {
     band = function(first, second)
-        local value, place = 0, 1
-        while first > 0 and second > 0 do
-            if first % 2 == 1 and second % 2 == 1 then
-                value = value + place
-            end
-            first, second, place = math.floor(first / 2), math.floor(second / 2), place * 2
-        end
-        return value
+        return Bitwise(first, second, function(firstBit, secondBit)
+            return firstBit == 1 and secondBit == 1
+        end)
+    end,
+    bor = function(first, second)
+        return Bitwise(first, second, function(firstBit, secondBit)
+            return firstBit == 1 or secondBit == 1
+        end)
+    end,
+    bxor = function(first, second)
+        return Bitwise(first, second, function(firstBit, secondBit)
+            return firstBit ~= secondBit
+        end)
+    end,
+    lshift = function(value, places)
+        return ToSignedUInt32(value * 2 ^ places)
+    end,
+    rshift = function(value, places)
+        return math.floor(value % UINT32_RANGE / 2 ^ places)
     end,
 }
 
@@ -367,10 +403,17 @@ Enum = {
 }
 
 DEFAULT_CHAT_FRAME = {
-    AddMessage = function(_, message)
-        Test.messages[#Test.messages + 1] = message
+    AddMessage = function()
+        error("Orbit-Games must never write to a chat frame")
     end,
 }
+SELECTED_CHAT_FRAME = DEFAULT_CHAT_FRAME
+SendChatMessage = function()
+    error("Orbit-Games must never send visible chat")
+end
+print = function()
+    error("Orbit-Games must never print to chat")
+end
 
 C_ChatInfo = {
     InChatMessagingLockdown = function()
@@ -391,10 +434,10 @@ C_ChatInfo = {
         assert(not Test.restricted, "sent addon message while chat was restricted")
         assert(Test.addonPrefixes[prefix], "addon prefix was not registered")
         assert(type(text) == "string" and #text <= 255, "invalid addon message")
-        if prefix == "ORBITQUIZ8" then
+        if prefix == "ORBITGAMES1" then
             assert(channel == "WHISPER", "game payloads must use targeted whispers")
         else
-            assert(prefix == "ORBITQUIZDISC8", "unknown addon prefix")
+            assert(prefix == "ORBITGAMESDISC2", "unknown addon prefix")
             assert(
                 channel == "WHISPER"
                     or channel == "CHANNEL"
@@ -435,7 +478,13 @@ C_ChatInfo = {
         end
     end,
     SendChatMessage = function()
-        error("Orbit-Quiz must never send visible chat")
+        error("Orbit-Games must never send visible chat")
+    end,
+}
+
+C_InstanceEncounter = {
+    IsEncounterInProgress = function()
+        return Test.encounter
     end,
 }
 
@@ -454,10 +503,21 @@ local Widget = {}
 Widget.__index = Widget
 
 local function NewWidget(kind, name, parent)
-    return setmetatable(
-        { kind = kind, name = name, parent = parent, shown = true, enabled = true, scripts = {}, text = "" },
-        Widget
-    )
+    local widget = setmetatable({
+        kind = kind,
+        name = name,
+        parent = parent,
+        shown = true,
+        enabled = true,
+        scripts = {},
+        text = "",
+        children = {},
+    }, Widget)
+    if parent then
+        parent.children = parent.children or {}
+        parent.children[#parent.children + 1] = widget
+    end
+    return widget
 end
 
 local Animation = {}
@@ -775,6 +835,10 @@ function Widget:GetParent()
     return self.parent
 end
 
+function Widget:GetName()
+    return self.name
+end
+
 function Widget:SetParent(parent)
     self.parent = parent
 end
@@ -887,6 +951,14 @@ function Widget:SetFrameStrata(strata)
     self.strata = strata
 end
 
+function Widget:SetFixedFrameLevel(fixed)
+    self.fixedFrameLevel = fixed
+end
+
+function Widget:SetFixedFrameStrata(fixed)
+    self.fixedFrameStrata = fixed
+end
+
 function Widget:GetFrameStrata()
     return self.strata or self.parent and self.parent:GetFrameStrata() or "MEDIUM"
 end
@@ -959,12 +1031,27 @@ function Widget:SetObeyStepOnDrag(obey)
     self.obeyStepOnDrag = obey
 end
 
-function Widget:SetNarrationLabelRegion(label)
-    self.narrationLabelRegion = label
+function Widget:SetOrientation(orientation)
+    assert(self.kind == "Slider", "orientation belongs to a Slider")
+    assert(orientation == "HORIZONTAL" or orientation == "VERTICAL", "invalid slider orientation")
+    self.orientation = orientation
 end
 
-function Widget:SetNarrationValueFormatter(formatter)
-    self.narrationValueFormatter = formatter
+function Widget:GetOrientation()
+    assert(self.kind == "Slider", "orientation belongs to a Slider")
+    return self.orientation
+end
+
+function Widget:SetThumbTexture(asset)
+    assert(self.kind == "Slider", "thumb textures belong to a Slider")
+    local thumb = self.thumbTexture or self.Thumb or self:CreateTexture(nil, "ARTWORK")
+    thumb:SetTexture(asset)
+    self.thumbTexture, self.Thumb = thumb, thumb
+end
+
+function Widget:GetThumbTexture()
+    assert(self.kind == "Slider", "thumb textures belong to a Slider")
+    return self.thumbTexture or self.Thumb
 end
 
 function Widget:GetObeyStepOnDrag()
@@ -1019,6 +1106,21 @@ end
 
 function Widget:SetVertexColor(...)
     self.vertexColor = { ... }
+end
+
+function Widget:SetDesaturated(desaturated)
+    assert(self.kind == "Texture", "only textures can be desaturated")
+    self.desaturated = desaturated == true
+end
+
+function Widget:IsDesaturated()
+    assert(self.kind == "Texture", "only textures expose desaturation")
+    return self.desaturated == true
+end
+
+function Widget:GetVertexColor()
+    local color = self.vertexColor or { 1, 1, 1, 1 }
+    return color[1], color[2], color[3], color[4] or 1
 end
 
 function Widget:SetRotation(rotation)
@@ -1178,6 +1280,31 @@ function Widget:CreateTexture(name, layer, template, sublevel)
     return texture
 end
 
+function Widget:CreateLine(name, layer, template, sublevel)
+    Test.lineCreations = Test.lineCreations + 1
+    local line = NewWidget("Line", name, self)
+    line.template, line.drawLayer, line.drawSublevel = template, layer, sublevel
+    self.lines = self.lines or {}
+    self.lines[#self.lines + 1] = line
+    return line
+end
+
+function Widget:SetStartPoint(...)
+    self.startPoint = { ... }
+end
+
+function Widget:SetEndPoint(...)
+    self.endPoint = { ... }
+end
+
+function Widget:SetThickness(thickness)
+    self.thickness = thickness
+end
+
+function Widget:GetThickness()
+    return self.thickness
+end
+
 function Widget:CreateMaskTexture(name, layer, template, sublevel)
     Test.maskCreations = Test.maskCreations + 1
     local mask = NewWidget("MaskTexture", name, self)
@@ -1249,6 +1376,30 @@ end
 
 function Widget:GetText()
     return self.text
+end
+
+function Widget:SetOwner(owner, anchor)
+    assert(self.kind == "GameTooltip", "tooltip ownership belongs to a native GameTooltip")
+    self.owner, self.ownerAnchor = owner, anchor
+    self.ownerCalls = (self.ownerCalls or 0) + 1
+    self.lines = {}
+end
+
+function Widget:AddLine(text, ...)
+    assert(self.kind == "GameTooltip" and type(text) == "string", "tooltip lines require plain text")
+    self.lines[#self.lines + 1] = { text, ... }
+end
+
+function Widget:AddDoubleLine(leftText, rightText, ...)
+    assert(
+        self.kind == "GameTooltip" and type(leftText) == "string" and type(rightText) == "string",
+        "tooltip double lines require plain left and right text"
+    )
+    self.lines[#self.lines + 1] = { leftText, rightText, ... }
+end
+
+function Widget:NumLines()
+    return #self.lines
 end
 
 function Widget:GetStringHeight()
@@ -1358,6 +1509,22 @@ function Widget:RegisterForDrag(value)
     self.drag = value
 end
 
+function Widget:RegisterForClicks(...)
+    self.clicks = { ... }
+end
+
+function Widget:SetHighlightTexture(texture)
+    self.highlightTexture = texture
+end
+
+function Widget:LockHighlight()
+    self.highlightLocked = true
+end
+
+function Widget:UnlockHighlight()
+    self.highlightLocked = false
+end
+
 function Widget:StartMoving()
     self.moving = true
 end
@@ -1366,27 +1533,40 @@ function Widget:StopMovingOrSizing()
     self.moving = false
 end
 
+local function DispatchVisibility(widget, script)
+    if widget.scripts[script] then
+        widget.scripts[script](widget)
+    end
+    for _, child in ipairs(widget.children) do
+        if child.shown then
+            DispatchVisibility(child, script)
+        end
+    end
+end
+
 function Widget:Show()
     self.showCalls = (self.showCalls or 0) + 1
+    local wasVisible = self:IsVisible()
     local changed = not self.shown
     self.shown = true
     if changed then
         self.showTransitions = (self.showTransitions or 0) + 1
     end
-    if changed and self.scripts.OnShow then
-        self.scripts.OnShow(self)
+    if not wasVisible and self:IsVisible() then
+        DispatchVisibility(self, "OnShow")
     end
 end
 
 function Widget:Hide()
     self.hideCalls = (self.hideCalls or 0) + 1
+    local wasVisible = self:IsVisible()
     local changed = self.shown
     self.shown = false
     if changed then
         self.hideTransitions = (self.hideTransitions or 0) + 1
     end
-    if changed and self.scripts.OnHide then
-        self.scripts.OnHide(self)
+    if wasVisible then
+        DispatchVisibility(self, "OnHide")
     end
 end
 
@@ -1488,8 +1668,8 @@ function Widget:GenerateMenu()
     self.options = {}
     local owner = self
     local description = { entries = self.options }
-    function description:CreateRadio(text, selected, select, value)
-        local entry = { text = text, selected = selected, select = select, value = value }
+    local function CreateEntry(text, selected, select, value, radio)
+        local entry = { text = text, selected = selected, select = select, value = value, radio = radio }
         function entry:IsSelected()
             return self.selected(self.value)
         end
@@ -1497,15 +1677,24 @@ function Widget:GenerateMenu()
             return self.value
         end
         function entry:IsRadio()
-            return true
+            return self.radio
+        end
+        function entry:IsCheckbox()
+            return not self.radio
         end
         function entry:Pick()
             if not owner:IsEnabled() or self.enabled == false then
                 return false
             end
             self.select(self.value)
-            owner:Update()
-            owner:CloseMenu()
+            if self.radio then
+                owner:Update()
+                owner:CloseMenu()
+            elseif owner.shouldRegenerateOnResponse then
+                owner:GenerateMenu()
+            else
+                owner:Update()
+            end
             return true
         end
         function entry:SetEnabled(enabled)
@@ -1516,6 +1705,12 @@ function Widget:GenerateMenu()
         end
         owner.options[#owner.options + 1] = entry
         return entry
+    end
+    function description:CreateRadio(text, selected, select, value)
+        return CreateEntry(text, selected, select, value, true)
+    end
+    function description:CreateCheckbox(text, selected, select, value)
+        return CreateEntry(text, selected, select, value, false)
     end
     function description:SetScrollMode(maximum)
         self.maxScrollExtent = maximum
@@ -1550,15 +1745,18 @@ function Widget:SetDefaultText(text)
     self:Update()
 end
 
+function Widget:EnableRegenerateOnResponse()
+    self.shouldRegenerateOnResponse = true
+end
+
 function Widget:Update()
-    local text = self.defaultText or ""
+    local selections = {}
     for _, entry in ipairs(self.options or {}) do
         if entry:IsSelected() then
-            text = entry.text
-            break
+            selections[#selections + 1] = entry.text
         end
     end
-    self:SetText(text)
+    self:SetText(#selections > 0 and table.concat(selections, ", ") or self.defaultText or "")
 end
 
 function Widget:IsMenuOpen()
@@ -1637,6 +1835,39 @@ MinimalSliderWithSteppersMixin = {
     Event = { OnValueChanged = "OnValueChanged", OnInteractStart = "OnInteractStart", OnInteractEnd = "OnInteractEnd" },
 }
 
+function Mixin(object, ...)
+    for index = 1, select("#", ...) do
+        for key, value in pairs(select(index, ...)) do
+            object[key] = value
+        end
+    end
+    return object
+end
+
+NarrationSliderMixin = {}
+
+function NarrationSliderMixin:SetNarrationLabelRegion(region)
+    self.narrationLabelRegion = region
+end
+
+function NarrationSliderMixin:SetNarrationValueFormatter(formatter)
+    self.narrationValueFormatter = formatter
+end
+
+function NarrationSliderMixin:NarrationGetName()
+    if self.narrationLabel then
+        return self.narrationLabel
+    end
+    return self.narrationLabelRegion and self.narrationLabelRegion:GetText() or nil
+end
+
+function NarrationSliderMixin:NarrationGetDescription()
+    if self.narrationValueFormatter then
+        return self.narrationValueFormatter(self:GetValue(), self:GetMinMaxValues())
+    end
+    return tostring(self:GetValue())
+end
+
 function CreateMinimalSliderFormatter(_, value)
     if type(value) == "function" then
         return value
@@ -1649,6 +1880,12 @@ end
 function CreateFrame(kind, name, parent, template)
     local frame = NewWidget(kind, name, parent)
     frame.template = template
+    if kind == "Slider" then
+        frame.orientation = "VERTICAL"
+    end
+    if kind == "GameTooltip" then
+        frame.lines, frame.shown = {}, false
+    end
     if template == "BasicFrameTemplateWithInset" then
         frame.TitleText = NewWidget("FontString", nil, frame)
     elseif template == "UICheckButtonTemplate" or template == "UIPanelButtonNoTooltipTemplate" then
@@ -1842,10 +2079,15 @@ function CreateFrame(kind, name, parent, template)
         function frame:IsSliderEnabled()
             return self.sliderEnabled ~= false
         end
+        local function SetStepperEnabled(button, enabled)
+            button:SetEnabled(enabled)
+            button:SetAlpha(enabled and 1 or 0.5)
+            button.hierarchyDesaturation = enabled and 0 or 1
+        end
         function frame:UpdateStepperStates()
             local value, step = self.Slider:GetValue(), self.Slider:GetValueStep()
-            self.Back:SetEnabled(self:IsSliderEnabled() and value > self.Slider.minimum + step * 0.5)
-            self.Forward:SetEnabled(self:IsSliderEnabled() and value < self.Slider.maximum - step * 0.5)
+            SetStepperEnabled(self.Back, self:IsSliderEnabled() and value > self.Slider.minimum + step * 0.5)
+            SetStepperEnabled(self.Forward, self:IsSliderEnabled() and value < self.Slider.maximum - step * 0.5)
         end
         function frame:Init(value, minimum, maximum, steps, formatters)
             self.Slider:SetMinMaxValues(minimum, maximum)
@@ -1866,8 +2108,14 @@ function CreateFrame(kind, name, parent, template)
         end
         function frame:SetEnabled(enabled)
             self.sliderEnabled = enabled
+            self.Slider.Thumb:SetAlpha(enabled and 1 or 0.7)
             self.Slider:SetEnabled(enabled)
-            self:UpdateStepperStates()
+            if enabled then
+                self:UpdateStepperStates()
+            else
+                SetStepperEnabled(self.Back, false)
+                SetStepperEnabled(self.Forward, false)
+            end
         end
         frame.Back:SetScript("OnClick", function()
             frame.Slider:SetValue(frame.Slider:GetValue() - frame.Slider:GetValueStep())
@@ -1900,6 +2148,7 @@ function CreateFrame(kind, name, parent, template)
         end
     elseif template == "EditModeSettingSliderTemplate" then
         assert(kind == "Frame", "Edit Mode slider setting is an outer Frame")
+        frame.SetEnabled, frame.IsEnabled = false, false
         frame.shown = false
         frame:SetSize(343, 32)
         frame.Label = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlightMedium")
@@ -1942,7 +2191,9 @@ function CreateFrame(kind, name, parent, template)
         end
     elseif template == "MinimalSliderTemplate" then
         assert(kind == "Slider", "native slider template requires the Slider intrinsic")
+        Mixin(frame, NarrationSliderMixin)
         frame:SetSize(200, 19)
+        frame:SetOrientation("HORIZONTAL")
         frame:SetObeyStepOnDrag(true)
         for key, atlas in pairs({
             Left = "Minimal_SliderBar_Left",
@@ -1972,6 +2223,9 @@ function CreateFramePool(kind, parent, template, resetter)
         local frame = table.remove(self.inactive)
         local isNew = frame == nil
         frame = frame or CreateFrame(kind, nil, parent, template)
+        if isNew and resetter then
+            resetter(self, frame, true)
+        end
         self.active[frame] = true
         return frame, isNew
     end
@@ -2011,6 +2265,10 @@ MenuUtil = {
 
 UIParent = NewWidget("Frame", "UIParent")
 UIParent:SetSize(1920, 1080)
+Minimap = NewWidget("Minimap", "Minimap", UIParent)
+Minimap:SetSize(MINIMAP_SIZE, MINIMAP_SIZE)
+Minimap:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", 0, 0)
+GameTooltip = CreateFrame("GameTooltip", "GameTooltip", UIParent, "GameTooltipTemplate")
 PixelUtil = {
     GetPixelToUIUnitFactor = function()
         return 768 / select(2, GetPhysicalScreenSize())
@@ -2050,9 +2308,20 @@ PixelUtil = {
 UISpecialFrames = {}
 SlashCmdList = {}
 
+function Test.DispatchEvent(event, ...)
+    for index = 1, #Test.frames do
+        local frame = Test.frames[index]
+        local handler = frame:GetScript("OnEvent")
+        if frame.events and frame.events[event] and handler then
+            handler(frame, event, ...)
+        end
+    end
+end
+
 function Test.Initialize()
-    OrbitQuiz.Main:OnEvent("ADDON_LOADED", "Orbit-Quiz")
-    OrbitQuiz.Main:OnEvent("PLAYER_LOGIN")
+    Test.DispatchEvent("ADDON_LOADED", "Orbit-Games")
+    Test.DispatchEvent("PLAYER_LOGIN")
+    assert(#Test.errors == 0, Test.errors[1])
 end
 
 function Test.Advance(seconds)
@@ -2068,7 +2337,7 @@ function Test.Advance(seconds)
 end
 
 function Test.Incoming(text, name, guid, event, channelIndex, channelName)
-    OrbitQuiz.Main:OnEvent(
+    OrbitGames.Main:OnEvent(
         event or "CHAT_MSG_CHANNEL",
         text,
         name,

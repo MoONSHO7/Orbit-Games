@@ -18,11 +18,21 @@ local DISPLAYS = {
     { 1601, 901, 0.83 },
     { 800, 600, 1.25 },
 }
+local FOOTER_TOP_PADDING = 12
+local FOOTER_BOTTOM_PADDING = 12
+local FOOTER_BUTTON_HEIGHT = 20
+local FOOTER_SIDE_PADDING = 5
+local FOOTER_BUTTON_SPACING = 8
+local FOOTER_HEIGHT = FOOTER_TOP_PADDING + FOOTER_BUTTON_HEIGHT + FOOTER_BOTTOM_PADDING
 
-return function(Quiz)
+return function(Games)
+    local Quiz = Games.Quiz
+    local Cards = Games.Cards
     local assertions = 0
-    local UI, Widget, Session = Quiz.UI, Quiz.Widget, Quiz.Session
+    local UI, Widget, Session = Games.UI, Quiz.Widget, Quiz.Session
+    local HostPage, SettingsPage = Quiz.HostPage, Quiz.SettingsPage
     local defaultRulesKey = Quiz.Rules.Encode(Quiz.Rules.Normalize())
+    local cardsHostValueX, cardsHostRowStep, cardsHostColumnGap = 114, 40, 8
     local function Check(value, message)
         assertions = assertions + 1
         assert(value, message)
@@ -32,6 +42,13 @@ return function(Quiz)
     end
     local function Near(actual, expected, message)
         Check(math.abs(actual - expected) < EPSILON, message .. ": " .. actual .. " ~= " .. expected)
+    end
+    local function PixelNear(actual, expected, region, message)
+        local pixel = PixelUtil.GetPixelToUIUnitFactor() / region:GetEffectiveScale()
+        Check(
+            math.abs(actual - expected) <= pixel + EPSILON,
+            message .. ": " .. tostring(actual) .. " ~= " .. tostring(expected)
+        )
     end
     local function Grid(value, message)
         local pixels = value / PixelUtil.GetPixelToUIUnitFactor()
@@ -49,7 +66,7 @@ return function(Quiz)
         UIParent:SetScale(display[3])
         local factor = PixelUtil.GetPixelToUIUnitFactor()
         UIParent:SetSize(display[1] * factor / display[3], display[2] * factor / display[3])
-        Quiz.Main:OnEvent("DISPLAY_SIZE_CHANGED")
+        Games.Main:OnEvent("DISPLAY_SIZE_CHANGED")
     end
     local function Snapshot()
         local bar = Widget.questionScroll.ScrollBar
@@ -59,7 +76,10 @@ return function(Quiz)
             Widget.questionScroll,
             Widget.questionContent,
             Widget.prompt,
+            Widget.dragHandle,
             Widget.timer,
+            Widget.scoreRegion,
+            Widget.scoreValueText,
             Widget.scoreText,
             Widget.editOutline,
             bar,
@@ -150,11 +170,11 @@ return function(Quiz)
     bare:Hide()
     Check(Session:JoinHost(HOST, SESSION), "participant fixture joins a real protocol session")
     local client = Session.client
-    Session:Receive(HOST, { "W", client.request, SESSION, "Visual checks", "0.0" })
+    Session:Receive(HOST, { "W", client.request, SESSION, "0.0" })
     UI.frame:Hide()
     for case, display in ipairs({ { 1920, 1080, 0.71 }, { 800, 600, 1.25 } }) do
         Display(display)
-        UI:SaveWidgetSettings({ scale = case == 2 and 200 or 100 })
+        SettingsPage:SaveWidgetSettings({ scale = case == 2 and 200 or 100 })
         local question = {
             "Q",
             SESSION,
@@ -180,6 +200,18 @@ return function(Quiz)
         Session:Receive(HOST, { "O", SESSION, tostring(case), tostring(GetServerTime() + 15) })
         Widget:Refresh()
         Same(Session.view.state, "open", "stability fixture has an authoritative open clock")
+        local promptRect, handleRect = { Widget.prompt:GetScaledRect() }, { Widget.dragHandle:GetScaledRect() }
+        for index = 1, 4 do
+            Near(handleRect[index], promptRect[index], "question drag handle follows prompt geometry across displays")
+        end
+        Check(
+            Widget.dragHandle:GetBottom() >= Widget.timer:GetTop() - EPSILON,
+            "question handle never overlaps the timer"
+        )
+        Check(
+            Widget.dragHandle:GetRight() <= Widget.scoreRegion:GetLeft() + EPSILON,
+            "question handle excludes the score lane"
+        )
         local bar = Widget.questionScroll.ScrollBar
         if case == 2 then
             Check(bar:GetRange() > 0, "long-question case exercises a visible scrollbar")
@@ -243,6 +275,10 @@ return function(Quiz)
         })
         Widget:Refresh()
         Check(Widget.scoreAnimation:IsPlaying(), "confirmed result starts personal feedback once")
+        Same(Widget.scoreRegion:IsShown(), true, "confirmed result retains the permanent score region")
+        Same(Widget.scoreValueText:IsShown(), true, "confirmed result keeps the permanent score visible")
+        Same(Widget.scoreValueText:GetText(), "2.0", "confirmed result updates the permanent cumulative score")
+        Near(Widget.scoreValueText:GetAlpha(), 0.35, "active delta dims the permanent score without hiding it")
         local before = Snapshot()
         Session:Receive(HOST, {
             "R",
@@ -276,6 +312,9 @@ return function(Quiz)
         Widget:Refresh()
         Stable(before)
         Same(Widget.scoreText:IsShown(), false, "completed feedback remains hidden on refresh")
+        Same(Widget.scoreValueText:IsShown(), true, "completed feedback leaves the permanent score visible")
+        Same(Widget.scoreValueText:GetText(), "2.0", "completed feedback retains the cumulative score")
+        Same(Widget.scoreValueText:GetAlpha(), 1, "completed feedback restores permanent score opacity")
         if case == 2 then
             bar:ScrollTo(0, true)
             bar:ScrollTo(bar:GetRange())
@@ -290,11 +329,228 @@ return function(Quiz)
         end
     end
     Check(Session:Leave(), "pixel audit exits its participant fixture")
-    UI:SaveWidgetSettings({ scale = 100 })
+    SettingsPage:SaveWidgetSettings({ scale = 100 })
 
-    Check(Quiz.Development:ShowGames(), "setup audit populates actual pooled game rows")
+    Check(Games.Development:ShowGames(), "setup audit populates actual pooled game rows")
+    UI:SetTab("host")
     local settings, appearance = Quiz.Store:GetSettings(), Quiz.Store:GetWidgetSettings()
     local sawOddDivider = false
+    local function FooterGrid(visible, hidden, message)
+        local footer = HostPage.footer
+        Same(footer:GetParent(), UI.modePages[Quiz.id].host, message .. " footer belongs to the Quiz Host body")
+        Check(footer.hasButtons and footer:IsShown(), message .. " footer owns visible actions")
+        Check(UI.footerDivider:IsShown(), message .. " footer divider is visible with actions")
+        Near(footer:GetTop(), UI.footerDivider:GetTop(), message .. " footer joins the existing divider")
+        local scale = footer:GetEffectiveScale()
+        local top = PixelUtil.GetNearestPixelSize(FOOTER_TOP_PADDING, scale)
+        local bottom = PixelUtil.GetNearestPixelSize(FOOTER_BOTTOM_PADDING, scale)
+        local height = PixelUtil.GetNearestPixelSize(FOOTER_BUTTON_HEIGHT, scale)
+        local side = PixelUtil.GetNearestPixelSize(FOOTER_SIDE_PADDING, scale)
+        local spacing = PixelUtil.GetNearestPixelSize(FOOTER_BUTTON_SPACING, scale)
+        Near(
+            footer:GetHeight(),
+            PixelUtil.GetNearestPixelSize(FOOTER_HEIGHT, scale),
+            message .. " footer has Orbit height"
+        )
+        Edges(footer, message .. " footer")
+        for index, button in ipairs(visible) do
+            Check(button:IsShown(), message .. " shows button " .. index)
+            Same(button:GetParent(), footer, message .. " button stays inside the mode footer")
+            Near(button:GetHeight(), height, message .. " button uses Orbit footer height")
+            Near(button:GetWidth(), visible[1]:GetWidth(), message .. " buttons remain equal")
+            Near(footer:GetTop() - button:GetTop(), top, message .. " button uses Orbit top padding")
+            Check(
+                math.abs(button:GetBottom() - footer:GetBottom() - bottom)
+                    <= PixelUtil.GetPixelToUIUnitFactor() / scale + EPSILON,
+                message .. " button keeps Orbit bottom padding within one physical pixel"
+            )
+            Edges(button, message .. " button")
+            Edges(button.Text, message .. " button text")
+            if index > 1 then
+                Check(
+                    math.abs(button:GetLeft() - visible[index - 1]:GetRight() - spacing)
+                        <= PixelUtil.GetPixelToUIUnitFactor() / scale + EPSILON,
+                    message .. " buttons keep authored spacing within one physical pixel"
+                )
+            end
+        end
+        Near(visible[1]:GetLeft() - footer:GetLeft(), side, message .. " first button uses Orbit side padding")
+        Near(footer:GetRight() - visible[#visible]:GetRight(), side, message .. " last button uses Orbit side padding")
+        for index, button in ipairs(hidden) do
+            Check(not button:IsShown(), message .. " hides inactive button " .. index)
+        end
+    end
+    local function GamesFooter(message)
+        local footer = UI.gamesFooter
+        Same(footer:GetParent(), UI.pages.play, message .. " footer belongs to the Games page")
+        Check(footer.hasButtons and footer:IsVisible(), message .. " footer exposes the session action")
+        Check(UI.footerDivider:IsShown(), message .. " footer divider is visible")
+        Near(footer:GetTop(), UI.footerDivider:GetTop(), message .. " footer joins the shared divider")
+        local scale = footer:GetEffectiveScale()
+        local pixel = PixelUtil.GetPixelToUIUnitFactor() / scale
+        local top = PixelUtil.GetNearestPixelSize(FOOTER_TOP_PADDING, scale)
+        local bottom = PixelUtil.GetNearestPixelSize(FOOTER_BOTTOM_PADDING, scale)
+        local height = PixelUtil.GetNearestPixelSize(FOOTER_BUTTON_HEIGHT, scale)
+        local side = PixelUtil.GetNearestPixelSize(FOOTER_SIDE_PADDING, scale)
+        local spacing = PixelUtil.GetNearestPixelSize(FOOTER_BUTTON_SPACING, scale)
+        Near(footer:GetHeight(), PixelUtil.GetNearestPixelSize(FOOTER_HEIGHT, scale), message .. " footer height")
+        Near(UI.currentViewport:GetHeight(), height, message .. " status viewport height")
+        Near(UI.current:GetHeight(), height, message .. " status text height")
+        Near(UI.leave:GetHeight(), height, message .. " action height")
+        Near(footer:GetTop() - UI.currentViewport:GetTop(), top, message .. " status top padding")
+        Near(footer:GetTop() - UI.leave:GetTop(), top, message .. " action top padding")
+        Check(
+            math.abs(UI.currentViewport:GetBottom() - footer:GetBottom() - bottom) <= pixel + EPSILON,
+            message .. " status keeps bottom padding within one physical pixel"
+        )
+        Check(
+            math.abs(UI.leave:GetBottom() - footer:GetBottom() - bottom) <= pixel + EPSILON,
+            message .. " action keeps bottom padding within one physical pixel"
+        )
+        Near(UI.currentViewport:GetLeft() - footer:GetLeft(), side, message .. " status side padding")
+        Near(footer:GetRight() - UI.leave:GetRight(), side, message .. " action side padding")
+        Check(
+            math.abs(UI.leave:GetLeft() - UI.currentViewport:GetRight() - spacing) <= pixel + EPSILON,
+            message .. " footer regions keep authored spacing within one physical pixel"
+        )
+        Edges(footer, message .. " footer")
+        Edges(UI.currentViewport, message .. " status viewport")
+        Edges(UI.current, message .. " status")
+        Edges(UI.leave, message .. " action")
+        Edges(UI.leave.Text, message .. " action text")
+    end
+    local function FooterStates()
+        FooterGrid({ HostPage.save, HostPage.start }, { HostPage.stop, HostPage.pause }, "idle Quiz")
+        local isRunning, game = Quiz.Controller.IsRunning, Quiz.Controller.game
+        Quiz.Controller.IsRunning = function()
+            return true
+        end
+        Quiz.Controller.game = {
+            state = "open",
+            settings = { packId = HostPage.draft.packId },
+            rules = HostPage.rules,
+        }
+        HostPage:Refresh()
+        FooterGrid({ HostPage.stop, HostPage.pause }, { HostPage.save, HostPage.start }, "active Quiz")
+        Quiz.Controller.IsRunning, Quiz.Controller.game = isRunning, game
+        HostPage:Refresh()
+        FooterGrid({ HostPage.save, HostPage.start }, { HostPage.stop, HostPage.pause }, "restored Quiz")
+        UI:SetTab("settings")
+        Check(not UI.footerDivider:IsShown(), "Settings hides the divider at every tested display scale")
+        Check(not HostPage.footer:IsVisible(), "Settings hides the Host footer at every tested display scale")
+        Check(not UI.notice:IsShown(), "Settings has no passive hint at every tested display scale")
+        UI:SetTab("play")
+        GamesFooter("Games")
+        UI:SetTab("host")
+        FooterGrid({ HostPage.save, HostPage.start }, { HostPage.stop, HostPage.pause }, "returned Quiz")
+    end
+    local function CardsHostEdges()
+        local page, body = UI.pages.host, UI.modePages[Cards.id].host
+        local cardsHost = Cards.HostPage
+        for _, label in ipairs({
+            UI.hostToLabel,
+            UI.gameTypeLabel,
+            cardsHost.labels.variant,
+            cardsHost.labels.buyIn,
+            cardsHost.labels.blinds,
+            cardsHost.labels.maxPlayers,
+            cardsHost.labels.actionSeconds,
+            cardsHost.labels.rebuys,
+        }) do
+            Edges(label, "aligned Host-form label")
+        end
+        for _, control in ipairs({
+            UI.hostTo,
+            UI.gameType,
+            cardsHost.variant,
+            cardsHost.amounts.buyIn,
+            cardsHost.blindSlider,
+            cardsHost.blindSlider.Slider,
+            cardsHost.blindSlider.Value,
+            cardsHost.maxPlayers,
+            cardsHost.actionSeconds,
+            cardsHost.rebuys,
+        }) do
+            Edges(control, "aligned Host-form control")
+        end
+
+        local sharedValueX = PixelUtil.GetNearestPixelSize(cardsHostValueX, page:GetEffectiveScale())
+        local cardsValueX = PixelUtil.GetNearestPixelSize(cardsHostValueX, body:GetEffectiveScale())
+        for _, descriptor in ipairs({
+            { UI.hostTo, page, sharedValueX, "Host-to" },
+            { UI.gameType, page, sharedValueX, "Game-type" },
+            { cardsHost.variant, body, cardsValueX, "Card-game" },
+            { cardsHost.amounts.buyIn, body, cardsValueX, "Buy-in" },
+            { cardsHost.blindSlider.Slider, body, cardsValueX, "Blinds" },
+            { cardsHost.rebuys, body, cardsValueX, "Rebuys" },
+        }) do
+            local control, parent, expectedX, message = unpack(descriptor)
+            PixelNear(
+                control:GetLeft() - parent:GetLeft(),
+                expectedX,
+                control,
+                message .. " retains the shared value start"
+            )
+        end
+        for _, descriptor in ipairs({
+            { UI.hostTo, page, "Host-to" },
+            { UI.gameType, page, "Game-type" },
+            { cardsHost.variant, body, "Card-game" },
+            { cardsHost.amounts.buyIn, body, "Buy-in" },
+            { cardsHost.blindSlider, body, "Blinds" },
+            { cardsHost.rebuys, body, "Rebuys" },
+        }) do
+            local control, parent, message = unpack(descriptor)
+            PixelNear(control:GetRight(), parent:GetRight(), control, message .. " retains the Host-form right edge")
+        end
+
+        local rows = {
+            cardsHost.variant,
+            cardsHost.amounts.buyIn,
+            cardsHost.blindSlider,
+            cardsHost.maxPlayers,
+            cardsHost.rebuys,
+        }
+        local rowStep = PixelUtil.GetNearestPixelSize(cardsHostRowStep, body:GetEffectiveScale())
+        for index = 2, #rows do
+            PixelNear(
+                rows[index - 1]:GetTop() - rows[index]:GetTop(),
+                rowStep,
+                rows[index],
+                "Cards Host rows retain their uniform step"
+            )
+        end
+
+        local seatsLabel, timerLabel = cardsHost.labels.maxPlayers, cardsHost.labels.actionSeconds
+        PixelNear(seatsLabel:GetLeft(), body:GetLeft(), seatsLabel, "Seats cell retains the left form edge")
+        PixelNear(
+            cardsHost.actionSeconds:GetRight(),
+            body:GetRight(),
+            cardsHost.actionSeconds,
+            "Action-timer cell retains the right form edge"
+        )
+        PixelNear(
+            timerLabel:GetLeft() - cardsHost.maxPlayers:GetRight(),
+            PixelUtil.GetNearestPixelSize(cardsHostColumnGap, body:GetEffectiveScale()),
+            timerLabel,
+            "paired Host cells retain the center gap"
+        )
+        PixelNear(
+            cardsHost.maxPlayers:GetRight() - seatsLabel:GetLeft(),
+            cardsHost.actionSeconds:GetRight() - timerLabel:GetLeft(),
+            timerLabel,
+            "paired Host cells retain equal outer widths"
+        )
+        Near(seatsLabel:GetWidth(), timerLabel:GetWidth(), "paired Host labels retain equal widths")
+        Near(seatsLabel:GetTop(), timerLabel:GetTop(), "paired Host labels retain a common top")
+        Near(cardsHost.maxPlayers:GetWidth(), cardsHost.actionSeconds:GetWidth(), "paired controls retain equal widths")
+        Near(cardsHost.maxPlayers:GetTop(), cardsHost.actionSeconds:GetTop(), "paired controls retain a common top")
+        Near(
+            cardsHost.maxPlayers:GetBottom(),
+            cardsHost.actionSeconds:GetBottom(),
+            "paired controls retain a common bottom"
+        )
+    end
     local function SetupEdges()
         Edges(UI.frame, "setup root")
         Edges(UI.frame.Chrome.Background, "native sliced backdrop bounds")
@@ -302,20 +558,47 @@ return function(Quiz)
         for region in pairs(UI.placements) do
             Edges(region, "authored setup placement")
         end
-        for _, row in ipairs({ UI.scaleSlider, UI.fontRow }) do
+        Edges(UI.hostTo, "Host-to dropdown")
+        Edges(UI.gameType, "Game-type dropdown")
+        Check(UI.hostTo:GetTop() > UI.gameType:GetTop(), "Host-to remains above Game type after resnapping")
+        Check(UI.hostTo:GetBottom() > UI.gameType:GetTop(), "Host-to and Game type remain physically separated")
+        for gameTypeId, pages in pairs(UI.modePages) do
+            Edges(pages.host, gameTypeId .. " Host body")
+            Check(
+                UI.gameType:GetBottom() > pages.host:GetTop(),
+                "Game type remains above the " .. gameTypeId .. " Host body"
+            )
+        end
+        Check(
+            Cards.HostPage.rebuys:GetBottom() > UI.notice:GetTop(),
+            "shifted Cards Host controls stay clear of the shared notice lane"
+        )
+        CardsHostEdges()
+        Edges(Quiz.ScoreView.scroll, "expanded score list")
+        Near(
+            Quiz.ScoreView.scroll:GetBottom(),
+            Quiz.ScoreView.page:GetBottom(),
+            "the score list stays flush with its page after removing the hint"
+        )
+        Same(Quiz.ScoreView.hint, nil, "score resnapping never recreates passive guidance")
+        for _, row in ipairs({ SettingsPage.scaleSlider, SettingsPage.fontRow }) do
             Near(
                 row:GetHeight(),
-                PixelUtil.GetNearestPixelSize(row == UI.scaleSlider and 32 or 26, row:GetEffectiveScale()),
+                PixelUtil.GetNearestPixelSize(row == SettingsPage.scaleSlider and 32 or 26, row:GetEffectiveScale()),
                 "inline settings retain their authored height after creation at a different UI scale"
             )
             Edges(row.Label, "inline settings label")
         end
-        Near(UI.scaleSlider:GetHeight(), UI.scaleSlider.Slider:GetHeight(), "scale row and native wrapper stay flush")
-        Edges(UI.scaleSlider.Slider, "inline slider wrapper")
-        Edges(UI.scaleSlider.Value, "inline percentage")
-        Edges(UI.fontPicker, "inline font picker")
-        Edges(UI.fontPicker.Text, "collapsed font preview")
-        Edges(UI.fontPicker.Arrow, "collapsed font arrow")
+        Near(
+            SettingsPage.scaleSlider:GetHeight(),
+            SettingsPage.scaleSlider.Slider:GetHeight(),
+            "scale row and native wrapper stay flush"
+        )
+        Edges(SettingsPage.scaleSlider.Slider, "inline slider wrapper")
+        Edges(SettingsPage.scaleSlider.Value, "inline percentage")
+        Edges(SettingsPage.fontPicker, "inline font picker")
+        Edges(SettingsPage.fontPicker.Text, "collapsed font preview")
+        Edges(SettingsPage.fontPicker.Arrow, "collapsed font arrow")
         Near(
             UI.gameRows[#UI.gameRows]:GetBottom(),
             UI.gamesContent:GetBottom(),
@@ -334,9 +617,15 @@ return function(Quiz)
             Edges(tab.Text, "tab text bounds")
             Edges(tab.highlight, "tapered tab highlight")
         end
-        for button in pairs(Quiz.Controls.buttons) do
-            Edges(button.Text, "owned setup button text bounds")
+        for button in pairs(Games.Controls.buttons) do
+            local parent = button:GetParent()
+            local inactiveFooter = (parent == HostPage.footer or parent == Cards.HostPage.footer)
+                and UI.placements[button] == nil
+            if not inactiveFooter then
+                Edges(button.Text, "owned setup button text bounds")
+            end
         end
+        FooterStates()
         for _, scroll in ipairs({ UI.gamesScroll, UI.boardScroll }) do
             local bar = scroll.ScrollBar
             Same(bar.layoutDepth, 0, "setup refresh completes its nested scrollbar layout batch")
@@ -354,14 +643,14 @@ return function(Quiz)
             "setup keeps its upper screen bounds after dragging"
         )
         Same(
-            UI.scaleSlider.Slider.Slider:GetScript("OnValueChanged"),
-            UI.scaleSlider.Slider.Slider.templateValueChanged,
+            SettingsPage.scaleSlider.Slider.Slider:GetScript("OnValueChanged"),
+            SettingsPage.scaleSlider.Slider.Slider.templateValueChanged,
             "pixel refresh retains the native slider callback"
         )
         for _, event in ipairs({ "OnMouseDown", "OnMouseUp", "OnShow", "OnEnable", "OnDisable" }) do
             Same(
-                UI.start:GetScript(event),
-                UI.start.templateScripts[event],
+                HostPage.start:GetScript(event),
+                HostPage.start.templateScripts[event],
                 "pixel refresh retains native button scripts"
             )
         end
@@ -382,15 +671,15 @@ return function(Quiz)
         UI.gamesScroll.ScrollBar:ScrollTo(10000, true)
         SetupEdges()
         UI.gamesScroll.ScrollBar:ScrollTo(0, true)
-        Quiz.Main:OnEvent("UI_SCALE_CHANGED")
+        Games.Main:OnEvent("UI_SCALE_CHANGED")
         SetupEdges()
     end
     Check(sawOddDivider, "divider audit includes an odd physical width rather than only symmetric halves")
-    Same(Quiz.Store:GetSettings().league, settings.league, "pixel audit does not save host settings")
+    Same(Quiz.Store:GetSettings().packId, settings.packId, "pixel audit does not save the selected Quiz pack")
     Same(Quiz.Store:GetWidgetSettings().scale, appearance.scale, "pixel audit does not save widget scale")
     Same(Quiz.Store:GetWidgetSettings().font, appearance.font, "pixel audit does not save widget font")
 
-    local scroll, content = Quiz.Controls:Scroll(UI.frame, 100, 90)
+    local scroll, content = Games.Controls:Scroll(UI.frame, 100, 90)
     PixelUtil.SetPoint(scroll, "TOPLEFT", UI.frame, "TOPLEFT", 0, 0)
     local bar = scroll.ScrollBar
     local pixel = PixelUtil.GetNearestPixelSize(0, scroll:GetEffectiveScale(), 1)
@@ -457,7 +746,7 @@ return function(Quiz)
     Same(bar.Animator:GetScript("OnUpdate"), nil, "shrinking content cancels an obsolete scroll destination")
     Check(scroll:GetVerticalScroll() <= 4 * pixel + EPSILON, "shrinking content clamps to the new pixel extent")
     scroll:Hide()
-    Quiz.Development:HideGames()
+    Games.Development:HideGames()
     UI.frame:Hide()
     Same(#Test.errors, 0, "visual-stability checks never hit the native error boundary")
     Same(_G.Orbit, nil, "pixel and click behavior stays standalone")

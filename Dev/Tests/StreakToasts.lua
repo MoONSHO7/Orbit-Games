@@ -3,22 +3,20 @@ local TOAST_SECONDS = 3.2
 local SOUND_POLL_SECONDS = 0.05
 local BURST_DROP_PIXELS = 4
 local BURST_SCALE = 0.8
-local CAPTION_PULSE_STREAK = 10
-local CAPTION_PULSE_SCALE = 1.2
-local CAPTION_PULSE_SECONDS = 1.1
 local TEXT_GAP_PIXELS = 2
 local QUEUE_LIMIT = 32
 local DISPLAY_MODES = { { 1920, 1080, 0.71 }, { 1601, 901, 0.83 }, { 800, 600, 1.25 } }
 local SOUND_FILES = {
-    [5] = "dominating.mp3",
-    [6] = "ownage.mp3",
-    [7] = "rampage.mp3",
-    [8] = "wicked-sick.mp3",
-    [9] = "holyshit.mp3",
-    [10] = "godlike.mp3",
+    [5] = "Playback\\dominating-100.ogg",
+    [6] = "Playback\\ownage-100.ogg",
+    [7] = "Playback\\rampage-100.ogg",
+    [8] = "Playback\\wicked-sick-100.ogg",
+    [9] = "Playback\\holyshit-100.ogg",
+    [10] = "Playback\\godlike-100.ogg",
 }
 
-return function(Quiz)
+return function(Games)
+    local Quiz = Games.Quiz
     local assertions = 0
     local function Check(value, message)
         assertions = assertions + 1
@@ -64,7 +62,7 @@ return function(Quiz)
     local parent = CreateFrame("Frame", nil, UIParent)
     PixelUtil.SetPoint(parent, "TOPLEFT", UIParent, "TOPLEFT", 0, 0)
     PixelUtil.SetSize(parent, 380, 160)
-    local fonts = { answer = CreateFont("OrbitQuizToastTestAnswer"), winner = CreateFont("OrbitQuizToastTestWinner") }
+    local fonts = { answer = CreateFont("OrbitGamesToastTestAnswer"), winner = CreateFont("OrbitGamesToastTestWinner") }
     for _, font in pairs(fonts) do
         font:CopyFontObject(GameFontHighlight)
     end
@@ -108,32 +106,14 @@ return function(Quiz)
     Near(Toasts.animation:GetDuration(), TOAST_SECONDS, "visual lifetime is independent from native sound completion")
     Check(Toasts.sweepAnimation:GetDuration() < TOAST_SECONDS, "sweep finishes within its toast")
     Check(Toasts.flareAnimation:GetDuration() < TOAST_SECONDS, "flare finishes within its toast")
-    Same(Toasts.captionAnimation:GetParent(), Toasts.frame, "caption pulse belongs to the existing toast frame")
-    Same(Toasts.captionAnimation:GetLooping(), "NONE", "high-streak pulse is a bounded one-shot animation")
-    Near(
-        Toasts.captionAnimation:GetDuration(),
-        CAPTION_PULSE_SECONDS,
-        "caption pulse returns to normal before the toast fades"
-    )
-    Same(Toasts.captionAnimation:IsPlaying(), false, "idle captions never pulse")
-    local pulseSteps = { Toasts.captionAnimation:GetAnimations() }
-    Same(#pulseSteps, 2, "caption pulse reuses exactly two native scale animations")
-    for order, step in ipairs(pulseSteps) do
-        Same(step.kind, "Scale", "caption pulse uses native scale rather than font changes")
-        Same(step:GetTarget(), Toasts.captionText, "pulse transforms only the streak caption")
-        Same(step:GetOrder(), order, "grow and settle stages run sequentially")
-        Near(step:GetDuration(), CAPTION_PULSE_SECONDS / 2, "both caption pulse stages have equal duration")
-        Same(step:GetSmoothing(), order == 1 and "OUT" or "IN", "caption pulse eases out and back in")
-        local origin, x, y = step:GetOrigin()
-        Same(origin, "TOP", "pulse grows down from the caption's fixed top edge")
-        Same(x, 0, "pulse has no extra horizontal origin offset")
-        Same(y, 0, "pulse preserves the name-to-caption gap")
-        local fromX, fromY = step:GetScaleFrom()
-        local toX, toY = step:GetScaleTo()
-        Near(fromX, order == 1 and 1 or CAPTION_PULSE_SCALE, "pulse starts from the preceding stage's scale")
-        Near(fromY, fromX, "pulse starts with uniform glyph scaling")
-        Near(toX, order == 1 and CAPTION_PULSE_SCALE or 1, "pulse ends at the expected scale")
-        Near(toY, toX, "pulse keeps glyph proportions uniform")
+    Same(Toasts.captionAnimation, nil, "streak captions have no grow-shrink animation")
+    for _, group in ipairs({ Toasts.frame:GetAnimationGroups() }) do
+        for _, effect in ipairs({ group:GetAnimations() }) do
+            Check(
+                effect.kind ~= "Scale" or effect:GetTarget() ~= Toasts.captionText,
+                "no native scale animation targets the streak caption"
+            )
+        end
     end
 
     for _, entry in ipairs({
@@ -198,21 +178,11 @@ return function(Quiz)
         local file = SOUND_FILES[math.min(event.streak, 10)]
         Same(
             played[index].path,
-            "Interface\\AddOns\\Orbit-Quiz\\Assets\\Sounds\\" .. file,
+            "Interface\\AddOns\\Orbit-Games\\Assets\\Sounds\\" .. file,
             "exact requested clip is used"
         )
         Same(Toasts.queueCount, #events - index, "simultaneous announcements are serialized")
         Same(Toasts.frame:IsShown(), true, "active announcement is visible")
-        Same(
-            Toasts.captionAnimation:IsPlaying(),
-            event.streak >= CAPTION_PULSE_STREAK,
-            "only ten-or-higher streaks pulse"
-        )
-        Same(
-            Toasts.captionAnimation.playCalls,
-            math.max(0, event.streak - CAPTION_PULSE_STREAK + 1),
-            "each high streak pulses once"
-        )
         Near(
             Toasts.flareAnimation.elapsed,
             0,
@@ -228,16 +198,6 @@ return function(Quiz)
             Test.AdvanceAnimations(0.2 + EPSILON)
             Same(Toasts.sweep:IsShown(), false, "the moving highlight disappears after crossing the burst")
             Test.AdvanceAnimations(2.1 + EPSILON)
-        elseif event.streak >= CAPTION_PULSE_STREAK then
-            local sound = Toasts.soundHandle
-            Test.AdvanceAnimations(CAPTION_PULSE_SECONDS / 2)
-            Same(Toasts.captionAnimation:IsPlaying(), true, "caption pulse remains active through its peak")
-            Same(Toasts.soundHandle, sound, "caption animation cannot restart native audio")
-            Stable()
-            Test.AdvanceAnimations(CAPTION_PULSE_SECONDS / 2 + EPSILON)
-            Same(Toasts.captionAnimation:IsPlaying(), false, "caption pulse settles after its second stage")
-            Stable()
-            Test.AdvanceAnimations(TOAST_SECONDS - CAPTION_PULSE_SECONDS + EPSILON)
         else
             Test.AdvanceAnimations(TOAST_SECONDS + EPSILON)
         end
@@ -245,7 +205,6 @@ return function(Quiz)
     Same(Toasts.frame:IsShown(), false, "footer disappears after the finite queue drains")
     Same(Toasts.active, nil, "drained renderer has no active event")
     Same(Toasts.soundHandle, nil, "drained renderer retains no sound handle")
-    Same(Toasts.captionAnimation:IsPlaying(), false, "drained renderer retains no caption pulse")
     Same(#played, #events, "each queued milestone plays once")
     Same(#stopped, 0, "natural audio completion never calls StopSound")
     Same(drained, 1, "queue completion notifies its owner once")
@@ -280,7 +239,6 @@ return function(Quiz)
         Toasts.animation,
         Toasts.flareAnimation,
         Toasts.sweepAnimation,
-        Toasts.captionAnimation,
     }) do
         Same(animation:IsPlaying(), false, "clear cancels every owned animation")
     end
@@ -288,31 +246,12 @@ return function(Quiz)
     Test.AdvanceAnimations(TOAST_SECONDS * 2)
     Same(#played, before, "cancelled animation callbacks cannot resurrect audio")
 
-    local pulsePlays, pulseStops = Toasts.captionAnimation.playCalls, Toasts.captionAnimation.stopCalls
     Toasts:Enqueue({ { name = "DeepStreak-TestRealm", streak = 25 }, { name = "LowStreak-TestRealm", streak = 5 } })
-    Same(Toasts.captionAnimation:IsPlaying(), true, "deep streaks beyond eleven also pulse")
-    Same(Toasts.captionAnimation.playCalls, pulsePlays + 1, "high-streak pulse reuses the existing animation group")
+    Same(Toasts.captionAnimation, nil, "deep streaks retain fixed-size captions")
     Test.AdvanceAnimations(TOAST_SECONDS + EPSILON)
     Same(Toasts.active.streak, 5, "queue can advance from a high to a low streak")
-    Same(Toasts.captionAnimation:IsPlaying(), false, "next lower streak cannot inherit an unfinished high-streak pulse")
-    Same(Toasts.captionAnimation.playCalls, pulsePlays + 1, "low streak does not restart the caption pulse")
-    Same(Toasts.captionAnimation.stopCalls, pulseStops + 1, "a late visual callback cancels stale caption motion")
     Stable()
     Test.AdvanceAnimations(TOAST_SECONDS + EPSILON)
-    for _, elapsed in ipairs({ 0.2, 0.8 }) do
-        Toasts:Enqueue({ { name = "CancelledPulse-TestRealm", streak = 10 } })
-        Test.AdvanceAnimations(elapsed)
-        Same(Toasts.captionAnimation:IsPlaying(), true, "cancellation fixture reaches a live pulse stage")
-        pulseStops, pulsePlays = Toasts.captionAnimation.stopCalls, Toasts.captionAnimation.playCalls
-        Toasts:Clear()
-        Same(Toasts.captionAnimation.stopCalls, pulseStops + 1, "clear cancels either stage of the native pulse")
-        Same(Toasts.captionAnimation:IsPlaying(), false, "clear leaves no residual caption animation")
-        Toasts:Enqueue({ { name = "AfterCancelledPulse-TestRealm", streak = 9 } })
-        Same(Toasts.captionAnimation.playCalls, pulsePlays, "lower streak after cancellation stays unanimated")
-        Same(Toasts.captionAnimation:IsPlaying(), false, "lower streak cannot inherit cancelled caption motion")
-        Stable()
-        Test.AdvanceAnimations(TOAST_SECONDS + EPSILON)
-    end
 
     events = {}
     for index = 1, QUEUE_LIMIT * 3 do
@@ -397,7 +336,7 @@ return function(Quiz)
 
     stopsBefore = #stopped
     StartAudioTail(3)
-    Poll(1.6)
+    Poll(1.8)
     Same(Toasts.active.name, "AfterAudioTail-TestRealm", "native startup delay is allowed beyond the visual deadline")
     Same(#stopped, stopsBefore, "delayed playback is never cut off at a guessed duration")
     Test.AdvanceAnimations(TOAST_SECONDS + EPSILON)
@@ -498,7 +437,7 @@ return function(Quiz)
         for _, label in ipairs({ Toasts.nameText, Toasts.captionText }) do
             local shadowX, shadowY = label:GetShadowOffset()
             local scale = label:GetEffectiveScale()
-            Near(shadowX * scale / pixel, -2, "toast horizontal shadow is two physical pixels")
+            Near(shadowX * scale / pixel, 2, "toast horizontal shadow is two physical pixels")
             Near(shadowY * scale / pixel, -2, "toast vertical shadow is two physical pixels")
         end
     end

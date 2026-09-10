@@ -1,5 +1,4 @@
 local PACK_ID = "appearance-fixture"
-local LEAGUE = "Appearance checks"
 local WIDE_FONT = "Quiz test wide font"
 local WIDE_PATH = "Interface\\AddOns\\QuizTest\\Wide.ttf"
 local LATE_FONT = "Quiz later font"
@@ -8,9 +7,12 @@ local CATALOGUE_FONT_COUNT = 150
 local CATALOGUE_PREFIX = "Quiz catalogue font "
 local EPSILON = 0.000001
 
-return function(Quiz)
+return function(Games)
+    local Quiz = Games.Quiz
     local assertions = 0
-    local UI, Widget, Store, Media = Quiz.UI, Quiz.Widget, Quiz.Store, Quiz.Media
+    local UI, Widget, Store, Media = Games.UI, Quiz.Widget, Quiz.Store, Games.Media
+    local L = Games.L
+    local SettingsPage = Quiz.SettingsPage
     local function Check(value, message)
         assertions = assertions + 1
         assert(value, message)
@@ -26,15 +28,18 @@ return function(Quiz)
         button:GetScript("OnClick")(button)
     end
     local function OpenFonts()
-        if not UI.fontPicker.Popup or not UI.fontPicker.Popup:IsShown() then
-            Click(UI.fontPicker)
+        if not SettingsPage.fontPicker.Popup or not SettingsPage.fontPicker.Popup:IsShown() then
+            Click(SettingsPage.fontPicker)
         end
-        Check(UI.fontPicker.isOpen and UI.fontPicker.Popup:IsShown(), "font picker opens its owned popup")
-        return UI.fontPicker.Popup
+        Check(
+            SettingsPage.fontPicker.isOpen and SettingsPage.fontPicker.Popup:IsShown(),
+            "font picker opens its owned popup"
+        )
+        return SettingsPage.fontPicker.Popup
     end
     local function FindFont(value)
         local popup = OpenFonts()
-        popup.Search:SetText(value == "" and Quiz.L.W_WIDGET_FONT_DEFAULT or value)
+        popup.Search:SetText(value == "" and Games.L.W_WIDGET_FONT_DEFAULT or value)
         for _, row in ipairs(popup.rows) do
             if row:IsShown() and row.value == value then
                 return row
@@ -45,8 +50,8 @@ return function(Quiz)
         local row = FindFont(value)
         Check(row and row:IsEnabled(), "requested SharedMedia font is selectable")
         Click(row)
-        Same(UI.fontPicker.Popup:IsShown(), false, "font selection closes the owned popup")
-        Same(UI.fontPicker.isOpen, false, "font selection resets the collapsed arrow state")
+        Same(SettingsPage.fontPicker.Popup:IsShown(), false, "font selection closes the owned popup")
+        Same(SettingsPage.fontPicker.isOpen, false, "font selection resets the collapsed arrow state")
     end
 
     Same(_G.Orbit, nil, "widget appearance has no Orbit dependency")
@@ -61,7 +66,7 @@ return function(Quiz)
     Check(Widget.frame:IsShown() and Widget.editing, "Settings keeps the live draggable widget preview")
     local tabs = 0
     local previousRight
-    for _, name in ipairs({ "play", "host", "scores", "settings" }) do
+    for _, name in ipairs({ "play", "host", "results", "settings" }) do
         local tab = UI.tabs[name]
         Check(tab:GetLeft() >= UI.frame:GetLeft() and tab:GetRight() <= UI.frame:GetRight(), "four tabs fit the dialog")
         if previousRight then
@@ -70,7 +75,7 @@ return function(Quiz)
         previousRight, tabs = tab:GetRight(), tabs + 1
     end
     Same(tabs, 4, "all four top-level tabs are available")
-    local control, steppers = UI.scaleSlider, UI.scaleSlider.Slider
+    local control, steppers = SettingsPage.scaleSlider, SettingsPage.scaleSlider.Slider
     local slider = steppers.Slider
     Same(control.template, "EditModeSettingSliderTemplate", "scale uses the native inline Edit Mode setting row")
     Same(steppers.template, "MinimalSliderWithSteppersTemplate", "scale retains Blizzard's native stepper slider")
@@ -78,7 +83,7 @@ return function(Quiz)
     Same(control.cbrHandles.unregisterCalls, 1, "standalone row detaches the captured Edit Mode handlers once")
     Check(control.cbrHandles:IsEmpty(), "no captured Blizzard dialog callback remains registered")
     Same(control.Label:GetText(), "Scale", "scale has its concise inline label")
-    Same(UI.fontRow.Label:GetText(), "Font", "font has its concise inline label")
+    Same(SettingsPage.fontRow.Label:GetText(), "Font", "font has its concise inline label")
     Same(control.Label:GetFontObject(), GameFontHighlight, "inline label uses the requested native font backing")
     Same(control.Value:GetFontObject(), GameFontHighlightSmall, "percentage uses its compact native font")
     Same(control.Value:GetJustifyH(), "RIGHT", "inline percentage is right aligned")
@@ -90,7 +95,7 @@ return function(Quiz)
     Same(select(2, slider:GetMinMaxValues()), 200, "scale maximum is two hundred percent")
     Same(slider:GetValueStep(), 5, "native scale slider advances in five-percent steps")
     Same(slider:GetObeyStepOnDrag(), true, "mouse dragging obeys native step snapping")
-    Same(slider.narrationLabelRegion, UI.scaleLabel, "native slider is labelled for narration")
+    Same(slider.narrationLabelRegion, SettingsPage.scaleLabel, "native slider is labelled for narration")
     Same(slider.Thumb.atlas, "Minimal_SliderBar_Button", "native slider keeps its Blizzard thumb art")
     Same(steppers.Back:GetScript("OnClick"), steppers.Back.templateClick, "native decrease handler remains intact")
     Same(
@@ -106,16 +111,24 @@ return function(Quiz)
     for event, handler in pairs(slider.templateScripts) do
         Same(slider:GetScript(event), handler, "native slider interaction handler is preserved: " .. event)
     end
-    Same(UI.fontPicker.template, nil, "font preview uses its own lean button rather than the pack dropdown template")
-    Same(UI.fontPicker.Arrow.atlas, "common-dropdown-icon-next", "font picker retains Orbit's native arrow asset")
-    Same(UI.fontPicker.Popup, nil, "searchable font popup is allocated only on first open")
+    Same(
+        SettingsPage.fontPicker.template,
+        nil,
+        "font preview uses its own lean button rather than the pack dropdown template"
+    )
+    Same(
+        SettingsPage.fontPicker.Arrow.atlas,
+        "common-dropdown-icon-next",
+        "font picker retains Orbit's native arrow asset"
+    )
+    Same(SettingsPage.fontPicker.Popup, nil, "searchable font popup is allocated only on first open")
     OpenFonts()
-    UI.fontPicker:CloseMenu()
-    local labels = { Widget.prompt, Widget.scoreText, Widget.packText, Widget.winnerText }
+    SettingsPage.fontPicker:CloseMenu()
+    local labels = { Widget.prompt, Widget.scoreValueText, Widget.scoreText, Widget.packText, Widget.winnerText }
     for _, choice in ipairs(Widget.choices) do
         labels[#labels + 1] = choice.Text
     end
-    Same(#labels, 10, "appearance covers the question, pack, winner, score and every reusable answer")
+    Same(#labels, 11, "appearance covers the question, pack, winner, both score roles and every reusable answer")
     local nativePath, nativeHeight, nativeFlags = GameFontHighlight:GetFont()
     local function FontIs(path)
         for _, label in ipairs(labels) do
@@ -131,7 +144,7 @@ return function(Quiz)
             Same(label.fontCalls, nil, "HUD role never assigns its font inline on the rendered FontString")
             local x, y = label:GetShadowOffset()
             local pixel = PixelUtil.GetPixelToUIUnitFactor() / label:GetEffectiveScale()
-            Near(x / pixel, -2, "font retains the two-physical-pixel leftward shadow")
+            Near(x / pixel, 2, "font retains the two-physical-pixel rightward shadow")
             Near(y / pixel, -2, "font retains the two-physical-pixel downward shadow")
             Same(select(4, label:GetShadowColor()), 1, "font retains its opaque shadow")
         end
@@ -155,6 +168,7 @@ return function(Quiz)
             Same(label:GetJustifyV(), snapshot[index].vertical, "font changes preserve vertical text alignment")
         end
         Same(Widget.prompt:GetMaxLines(), 0, "question still wraps through unlimited lines")
+        Same(Widget.scoreValueText:GetMaxLines(), 1, "permanent score stays on one line")
         Same(Widget.scoreText:GetMaxLines(), 1, "animated score stays on one line")
         for _, choice in ipairs(Widget.choices) do
             Same(choice.Text:GetMaxLines(), 0, "long answer wrapping remains unlimited")
@@ -189,20 +203,20 @@ return function(Quiz)
         return save(self, value)
     end
     Check(save(Store, { scale = 125 }), "external persisted appearance fixture saves")
-    UI:RefreshWidgetSettings()
+    SettingsPage:Refresh()
     Same(slider:GetValue(), 125, "programmatic settings load updates the native control")
     Same(writes, 0, "native value callback does not write settings while they are loading")
     control:SetValue(135)
     Same(writes, 0, "guarded outer row SetValue is never mistaken for a user drag")
     Same(Store:GetWidgetSettings().scale, 125, "programmatic inline value changes do not persist")
-    UI:RefreshWidgetSettings()
+    SettingsPage:Refresh()
     UI:Refresh()
     Same(writes, 0, "ordinary setup refresh cannot write appearance settings")
     Store.SaveWidgetSettings = save
-    UI:SaveWidgetSettings({ scale = 100 })
+    SettingsPage:SaveWidgetSettings({ scale = 100 })
 
     Check(
-        Quiz:RegisterQuestionPack({
+        Quiz:RegisterPack({
             id = PACK_ID,
             title = "Appearance tests",
             questions = {
@@ -223,9 +237,12 @@ return function(Quiz)
         }),
         "six-choice appearance fixture registers"
     )
-    Check(Quiz.Main:Start({ packId = PACK_ID, league = LEAGUE }), "real game starts while Settings is open")
-    local game, session = Quiz.Main.game, Quiz.Session.hostSession
+    Check(Games.Main:Start({ packId = PACK_ID }), "real game starts while Settings is open")
+    local game, session = Quiz.Controller.game, Quiz.Session.hostSession
     local round, deadline = game.round, game.round.deadline
+    Check(Widget.scoreRegion:IsShown(), "live appearance fixture shows the permanent score region")
+    Same(Widget.scoreValueText:GetText(), "0.0", "new appearance fixture begins with its visible zero total")
+    Same(Widget.scoreValueText:GetFontObject(), Widget.fontObjects.answer, "permanent score uses the answer font role")
     Click(Widget.choices[round.correctIndex])
     local answer = round.answers[Test.hostGUID]
     Same(answer.points, 2.5, "appearance fixture starts with an actual timed answer")
@@ -236,7 +253,13 @@ return function(Quiz)
     Test.fontWidths[WIDE_PATH] = 9
     Check(library:Register("font", WIDE_FONT, WIDE_PATH), "real SharedMedia accepts an installed font")
     Check(Media:HasFont(WIDE_FONT), "registered-font callback immediately updates the Settings catalogue")
+    Widget.scoreRegion:GetScript("OnEnter")(Widget.scoreRegion)
+    Check(Quiz.ScoreTooltip:IsOwned(Widget.scoreRegion), "active score opens its private tooltip before a font change")
+    Same(Quiz.Session.standingsVisible, true, "score hover enables demand-driven standings before a font change")
     PickFont(WIDE_FONT)
+    Check(not Quiz.ScoreTooltip:IsOwned(Widget.scoreRegion), "font reflow closes the anchored private score tooltip")
+    Same(Quiz.Session.standingsVisible, false, "font reflow cancels demand-driven standings")
+    frameCount = #Test.frames
     Same(Store:GetWidgetSettings().font, WIDE_FONT, "font choice persists its SharedMedia key")
     FontIs(WIDE_PATH)
     SameStyle(styles)
@@ -251,16 +274,26 @@ return function(Quiz)
             Same(label.fontObjectAssignments, calls[index][2], "scale/refresh does not reset font backing")
         end
     end
-    local menuMeasurements, previewFontCalls = UI.fontPicker.Popup.Measure.textCalls, UI.fontPicker.Text.fontCalls
+    local menuMeasurements, previewFontCalls =
+        SettingsPage.fontPicker.Popup.Measure.textCalls, SettingsPage.fontPicker.Text.fontCalls
     for _ = 1, 5 do
         UI:Refresh()
         Widget:Refresh()
         Widget:ApplySettings()
     end
-    Same(UI.fontPicker.Popup.Measure.textCalls, menuMeasurements, "ordinary refresh never rebuilds the font catalogue")
-    Same(UI.fontPicker.Text.fontCalls, previewFontCalls, "ordinary refresh never repaints the collapsed font preview")
+    Same(
+        SettingsPage.fontPicker.Popup.Measure.textCalls,
+        menuMeasurements,
+        "ordinary refresh never rebuilds the font catalogue"
+    )
+    Same(
+        SettingsPage.fontPicker.Text.fontCalls,
+        previewFontCalls,
+        "ordinary refresh never repaints the collapsed font preview"
+    )
     NoFontReset()
     local function Bounds()
+        local timerFillPixels, timerTrackPixels, timerFillOverhangPixels = 4, 2, 1
         local left, bottom, width, height = Widget.content:GetScaledRect()
         local screenLeft, screenBottom, screenWidth, screenHeight = UIParent:GetScaledRect()
         Check(
@@ -273,7 +306,13 @@ return function(Quiz)
         Check(viewport <= screenHeight * 0.58 + EPSILON, "scaled long question keeps its physical viewport cap")
         local factor = PixelUtil.GetPixelToUIUnitFactor()
         local scale = Widget.timer:GetEffectiveScale()
-        for _, region in ipairs({ Widget.content, Widget.scoreText, Widget.editOutline }) do
+        for _, region in ipairs({
+            Widget.content,
+            Widget.scoreRegion,
+            Widget.scoreValueText,
+            Widget.scoreText,
+            Widget.editOutline,
+        }) do
             local regionLeft, regionBottom, regionWidth, regionHeight = region:GetScaledRect()
             for _, edge in ipairs({ regionLeft, regionBottom, regionLeft + regionWidth, regionBottom + regionHeight }) do
                 Near(edge / factor, math.floor(edge / factor + 0.5), "scaled HUD and edit-outline bounds stay on-grid")
@@ -283,20 +322,39 @@ return function(Quiz)
             local thickness = index <= 2 and edge:GetHeight() or edge:GetWidth()
             Near(thickness * edge:GetEffectiveScale() / factor, 1, "edit-outline strokes remain one physical pixel")
         end
-        Near(Widget.timer:GetHeight() * scale / factor, 2, "scaled countdown remains two physical pixels tall")
         Near(
-            (Widget.prompt:GetBottom() - Widget.timer:GetTop()) * scale / factor,
+            Widget.timer:GetHeight() * scale / factor,
+            timerFillPixels,
+            "scaled countdown fill remains four physical pixels tall"
+        )
+        Near(
+            Widget.timer.Track:GetHeight() * scale / factor,
+            timerTrackPixels,
+            "scaled countdown backdrop remains two physical pixels tall"
+        )
+        Near(
+            (Widget.prompt:GetBottom() - Widget.timer.Track:GetTop()) * scale / factor,
             2,
-            "scaled prompt keeps its two-pixel timer gap"
+            "scaled prompt keeps its two-pixel backdrop gap"
+        )
+        Near(
+            (Widget.timer:GetTop() - Widget.timer.Track:GetTop()) * scale / factor,
+            timerFillOverhangPixels,
+            "scaled fill remains one pixel above the backdrop"
+        )
+        Near(
+            (Widget.timer.Track:GetBottom() - Widget.timer:GetBottom()) * scale / factor,
+            timerFillOverhangPixels,
+            "scaled fill remains one pixel below the backdrop"
         )
         for _, label in ipairs(labels) do
             local x, y = label:GetShadowOffset()
-            Near(x * label:GetEffectiveScale() / factor, -2, "all ten text shadows follow combined widget/UI scale")
+            Near(x * label:GetEffectiveScale() / factor, 2, "all eleven text shadows follow combined widget/UI scale")
             Near(y * label:GetEffectiveScale() / factor, -2, "combined scaling retains shadow direction")
         end
         for _, choice in ipairs(Widget.choices) do
             Check(
-                choice:GetRight() < Widget.scoreText:GetLeft(),
+                choice:GetRight() < Widget.scoreRegion:GetLeft(),
                 "scaled answer hit targets leave the score column clear"
             )
             Check(
@@ -304,13 +362,15 @@ return function(Quiz)
                 "scaled answer retains every wrapped line"
             )
         end
-        local timerLeft, timerBottom, timerWidth, timerHeight = Widget.timer:GetScaledRect()
-        for _, edge in ipairs({ timerLeft, timerBottom, timerLeft + timerWidth, timerBottom + timerHeight }) do
-            Near(
-                edge / factor,
-                math.floor(edge / factor + 0.5),
-                "scaled countdown edges stay on the physical pixel grid"
-            )
+        for _, region in ipairs({ Widget.timer, Widget.timer.Track }) do
+            local timerLeft, timerBottom, timerWidth, timerHeight = region:GetScaledRect()
+            for _, edge in ipairs({ timerLeft, timerBottom, timerLeft + timerWidth, timerBottom + timerHeight }) do
+                Near(
+                    edge / factor,
+                    math.floor(edge / factor + 0.5),
+                    "scaled countdown and backdrop edges stay on the physical pixel grid"
+                )
+            end
         end
     end
     local scales, overflow = 0, false
@@ -352,14 +412,13 @@ return function(Quiz)
     Same(#Test.frames, frameCount, "scale/font appearance reuses existing frames")
     Same(Test.fontStringCreations, fontCount, "scale/font appearance reuses all text regions")
     Same(#Test.tickers, tickerCount, "appearance needs no additional timer")
-    Same(Store:GetSettings().league, hostSettings.league, "appearance leaves host configuration alone")
-    Same(Store:GetSettings().packId, hostSettings.packId, "appearance never changes the selected question pack")
+    Same(Store:GetSettings().packId, hostSettings.packId, "appearance never changes the selected Quiz pack")
     Test.physicalWidth, Test.physicalHeight = 1920, 768
     UIParent:SetScale(1)
     UIParent:SetSize(1920, 1080)
     Widget.position = { x = 0.5, y = 0.75 }
     Widget:OnDisplayChanged()
-    UI:SaveWidgetSettings({ scale = 100 })
+    SettingsPage:SaveWidgetSettings({ scale = 100 })
     local names = Media:GetFontNames()
     for index = 2, #names do
         Check(names[index - 1] < names[index], "font catalogue remains alphabetically sorted")
@@ -373,7 +432,7 @@ return function(Quiz)
     Same(Media:ResolveFont(WIDE_FONT), WIDE_PATH, "explicit widget key is not replaced by another addon's LSM override")
     library:SetGlobal("font", nil)
     styles = StyleSnapshot()
-    UI:SaveWidgetSettings({ font = LATE_FONT })
+    SettingsPage:SaveWidgetSettings({ font = LATE_FONT })
     FontIs(nil)
     SameStyle(styles)
     Same(Store:GetWidgetSettings().font, LATE_FONT, "missing font key remains saved for later availability")
@@ -384,16 +443,26 @@ return function(Quiz)
     )
     unavailable:GetScript("OnClick")(unavailable)
     Same(Store:GetWidgetSettings().font, LATE_FONT, "unavailable preview row cannot change the saved preference")
-    Check(UI.fontPicker.Popup:IsShown(), "disabled font row does not close the picker")
-    Check(UI.widgetSettingsHelp:GetText():find("available", 1, true), "Settings explains the missing-font fallback")
+    Check(SettingsPage.fontPicker.Popup:IsShown(), "disabled font row does not close the picker")
+    Same(SettingsPage.help, nil, "Settings creates no grey missing-font explanation")
+    Same(
+        SettingsPage.fontPicker.Text:GetText(),
+        L.W_WIDGET_FONT_UNAVAILABLE_F:format(LATE_FONT),
+        "the collapsed picker marks its unavailable font without subtext"
+    )
     local revision = Media.revision
     Check(library:Register("font", LATE_FONT, LATE_PATH), "real library registers the previously missing font")
     Check(Media.revision > revision, "font registration advances the catalogue revision")
     FontIs(LATE_PATH)
     SameStyle(styles)
-    Same(UI.fontPicker.Popup.Search:GetText(), LATE_FONT, "late registration preserves the active font search")
+    Same(
+        SettingsPage.fontPicker.Popup.Search:GetText(),
+        LATE_FONT,
+        "late registration preserves the active font search"
+    )
     Check(unavailable:IsEnabled(), "late registration replaces the unavailable row without another user action")
     Same(unavailable.Text:GetFont(), LATE_PATH, "late registration updates the real preview row font")
+    Same(SettingsPage.fontPicker.Text:GetText(), LATE_FONT, "late registration clears the collapsed unavailable marker")
     Same(Store:GetWidgetSettings().font, LATE_FONT, "late registration preserves the chosen key")
     revision = Media.revision
     Check(
@@ -407,7 +476,7 @@ return function(Quiz)
         Check(library:Register("font", name, path), "faulty file may still be advertised by an external addon")
         local broken = FindFont(name)
         Check(broken and not broken:IsEnabled(), "a font that fails native SetFont is not offered as a working asset")
-        UI:SaveWidgetSettings({ font = name })
+        SettingsPage:SaveWidgetSettings({ font = name })
         FontIs(nil)
         SameStyle(styles)
         Same(Store:GetWidgetSettings().font, name, "font asset failure does not erase the user's selection")
@@ -419,7 +488,7 @@ return function(Quiz)
         Same(Widget.fontProbe.fontCalls, failedCalls, "normal refresh does not retry a broken external font every tick")
         Test.invalidFonts[path] = nil
         if index == 1 then
-            UI:SaveWidgetSettings({ font = name })
+            SettingsPage:SaveWidgetSettings({ font = name })
         else
             Test.DragSlider(slider, 105)
         end
@@ -429,7 +498,7 @@ return function(Quiz)
         Same(round.answers[Test.hostGUID], answer, "font retry preserves the existing timed answer object")
         Same(round.deadline, deadline, "font retry does not restart the answer clock")
         Same(Quiz.Session.hostSession, session, "font retry never changes game membership")
-        UI:SaveWidgetSettings({ scale = 100 })
+        SettingsPage:SaveWidgetSettings({ scale = 100 })
     end
     PickFont("")
     FontIs(nil)
@@ -455,7 +524,7 @@ return function(Quiz)
         local popup = OpenFonts()
         local search, clear = popup.Search, popup.Search.clearButton
         Same(popup:GetParent(), UIParent, "font popup is not clipped by the setup window")
-        Same(popup.owner, UI.fontPicker, "font popup remains owned by its one collapsed control")
+        Same(popup.owner, SettingsPage.fontPicker, "font popup remains owned by its one collapsed control")
         Check(#popup.rows <= 10 and popup.visibleSlots <= 10, "large font catalogues use at most ten preview rows")
         Same(search:GetText(), "", "opening resets the previous search")
         Check(search:HasFocus(), "opening gives the owned search input keyboard focus")
@@ -537,7 +606,7 @@ return function(Quiz)
         Test.cursorX, Test.cursorY = -1, -1
         popup:GetScript("OnEvent")(popup, "GLOBAL_MOUSE_DOWN")
         Same(popup:IsShown(), false, "outside mouse input dismisses the popup")
-        Same(UI.fontPicker.isOpen, false, "outside dismissal restores the closed arrow state")
+        Same(SettingsPage.fontPicker.isOpen, false, "outside dismissal restores the closed arrow state")
         Test.cursorX, Test.cursorY = cursorX, cursorY
         local function GridEdges(region)
             local x, y, w, h = region:GetScaledRect()
@@ -554,7 +623,7 @@ return function(Quiz)
             UIParent:SetSize(display[1] * factor / display[3], display[2] * factor / display[3])
             for _, location in ipairs({ { x = 0, y = 0 }, { x = 1, y = 1 } }) do
                 UI.position = location
-                Quiz.Main:OnEvent("DISPLAY_SIZE_CHANGED")
+                Games.Main:OnEvent("DISPLAY_SIZE_CHANGED")
                 OpenFonts()
                 local x, y, w, h = popup:GetScaledRect()
                 local sx, sy, sw, sh = UIParent:GetScaledRect()
@@ -562,7 +631,7 @@ return function(Quiz)
                 Check(x + w <= sx + sw and y + h <= sy + sh, "font popup stays within the upper screen edges")
                 Near(
                     popup:GetEffectiveScale(),
-                    UI.fontPicker:GetEffectiveScale(),
+                    SettingsPage.fontPicker:GetEffectiveScale(),
                     "popup follows setup rather than HUD scale"
                 )
                 for _, region in ipairs({
@@ -575,9 +644,9 @@ return function(Quiz)
                     clear.Icon,
                     popup.Content,
                     popup.Empty,
-                    UI.fontPicker,
-                    UI.fontPicker.Text,
-                    UI.fontPicker.Arrow,
+                    SettingsPage.fontPicker,
+                    SettingsPage.fontPicker.Text,
+                    SettingsPage.fontPicker.Arrow,
                 }) do
                     GridEdges(region)
                 end
@@ -604,7 +673,7 @@ return function(Quiz)
         Test.physicalWidth, Test.physicalHeight = 1920, 768
         UIParent:SetScale(1)
         UIParent:SetSize(1920, 1080)
-        Quiz.Main:OnEvent("DISPLAY_SIZE_CHANGED")
+        Games.Main:OnEvent("DISPLAY_SIZE_CHANGED")
         Same(round.answers[Test.hostGUID], answer, "popup positioning never edits the active answer")
         Same(round.deadline, deadline, "popup interaction never extends the round")
         Same(Quiz.Session.hostSession, session, "popup display changes do not alter session membership")
@@ -613,15 +682,15 @@ return function(Quiz)
     end
     OpenFonts()
     UI:SetTab("play")
-    Same(UI.fontPicker.Popup:IsShown(), false, "leaving Settings closes its font popup")
+    Same(SettingsPage.fontPicker.Popup:IsShown(), false, "leaving Settings closes its font popup")
     UI:SetTab("settings")
     OpenFonts()
     UI.frame:GetScript("OnDragStart")(UI.frame)
-    Same(UI.fontPicker.Popup:IsShown(), false, "dragging setup closes the font popup")
+    Same(SettingsPage.fontPicker.Popup:IsShown(), false, "dragging setup closes the font popup")
     UI.frame:GetScript("OnDragStop")(UI.frame)
     OpenFonts()
-    Quiz.Main:OnEvent("UI_SCALE_CHANGED")
-    Same(UI.fontPicker.Popup:IsShown(), false, "display changes close the anchored font popup")
+    Games.Main:OnEvent("UI_SCALE_CHANGED")
+    Same(SettingsPage.fontPicker.Popup:IsShown(), false, "display changes close the anchored font popup")
     Test.now = deadline - 2
     Widget:Refresh()
     Near(Widget.timer:GetValue(), 2, "appearance changes have not extended the live answer deadline")
@@ -648,18 +717,27 @@ return function(Quiz)
         end
         if ancestor then
             for _, label in ipairs(frame.fontStrings or {}) do
-                if label ~= UI.fontPicker.Text then
+                if label ~= SettingsPage.fontPicker.Text and label ~= Games.Cards.SettingsPage.fontPicker.Text then
                     Same(label.fontCalls, nil, "HUD appearance never restyles an unrelated setup font")
                 end
             end
         end
     end
-    Same(UI.fontPicker.Text:GetFont(), WIDE_PATH, "only the collapsed font preview mirrors the selected HUD font")
+    Same(
+        SettingsPage.fontPicker.Text:GetFont(),
+        WIDE_PATH,
+        "only the collapsed font preview mirrors the selected HUD font"
+    )
+    Same(
+        Games.Cards.SettingsPage.fontPicker.Text:GetFont(),
+        GameFontHighlight:GetFont(),
+        "Quiz font selection leaves the Cards font preview on its own default"
+    )
     OpenFonts()
     UI.frame:Hide()
-    Same(UI.fontPicker.Popup:IsShown(), false, "closing setup also closes the font popup")
+    Same(SettingsPage.fontPicker.Popup:IsShown(), false, "closing setup also closes the font popup")
     Check(Widget.frame:IsShown(), "closing Settings does not dismiss the active game")
-    Quiz.Main:Stop()
+    Games.Main:Stop()
     Same(#Test.errors, 0, "font/scale settings never reach the global error handler")
     Same(_G.Orbit, nil, "appearance remains independent of Orbit")
     return assertions

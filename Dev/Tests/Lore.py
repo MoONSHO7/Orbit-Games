@@ -10,7 +10,7 @@ from lupa.lua51 import LuaRuntime
 
 
 ROOT = Path(__file__).resolve().parents[2]
-PACK = ROOT / "Packs" / "WarcraftLore"
+PACK = ROOT / "Modes" / "Quiz" / "Packs" / "WarcraftLore"
 BUNDLED_PACK_ID = "warcraft-lore"
 BUNDLED_PACK_VERSION = 2
 DIFFICULTIES = ("easy", "medium", "hard", "very_hard")
@@ -102,15 +102,16 @@ def active_lore_files():
 
 def read_lore_files(paths):
     lua = LuaRuntime(unpack_returned_tuples=True)
-    namespace = lua.table()
+    games = lua.table()
+    games.Quiz = lua.table()
     compile_chunk = lua.eval("function(source, name) return assert(loadstring(source, name)) end")
     origins = {}
     for path in [PACK / "Assemble.lua", *paths]:
-        before = len(namespace.Lore.questions) if namespace.Lore else 0
-        compile_chunk(path.read_text(encoding="utf-8"), "@" + str(path))("Orbit-Quiz", namespace)
-        for index in range(before + 1, len(namespace.Lore.questions) + 1):
-            origins[namespace.Lore.questions[index].id] = path.name
-    return namespace.Lore.questions, origins
+        before = len(games.Quiz.Lore.questions) if games.Quiz.Lore else 0
+        compile_chunk(path.read_text(encoding="utf-8"), "@" + str(path))("Orbit-Games", games)
+        for index in range(before + 1, len(games.Quiz.Lore.questions) + 1):
+            origins[games.Quiz.Lore.questions[index].id] = path.name
+    return games.Quiz.Lore.questions, origins
 
 
 def read_drafts():
@@ -233,7 +234,8 @@ def audit(questions, draft=False, report=False, origins=None):
     return assertions
 
 
-def run_suite(namespace):
+def run_suite(games):
+    quiz = games.Quiz
     assertions = 0
 
     def check(condition, message):
@@ -242,14 +244,14 @@ def run_suite(namespace):
         if not condition:
             raise AssertionError(message)
 
-    packs = namespace.GetQuestionPacks(namespace)
+    packs = quiz.GetPacks(quiz)
     check(len(packs) == 1 and packs[1].id == BUNDLED_PACK_ID,
           "Exactly one bundled Warcraft Lore pack must replace Warcraft Basics")
     check(packs[1].version == BUNDLED_PACK_VERSION, "Comic-free Warcraft Lore must retain its ID at pack revision two")
-    questions = namespace.GetQuestions(namespace, BUNDLED_PACK_ID)
+    questions = quiz.GetQuestions(quiz, BUNDLED_PACK_ID)
     if isinstance(questions, tuple):
         questions = questions[0]
-    check(not (ROOT / "Packs" / "WarcraftBasics.lua").exists(),
+    check(not (PACK.parent / "WarcraftBasics.lua").exists(),
           "Warcraft Basics must not remain in the shipped pack directory")
     from run import toc_scripts
 
@@ -323,7 +325,7 @@ if __name__ == "__main__":
     else:
         from run import runtime
 
-        _, quiz = runtime()
-        run_suite(quiz)
+        _, games = runtime()
+        run_suite(games)
         if args.review:
-            review_candidates(quiz.GetQuestions(quiz, "warcraft-lore"))
+            review_candidates(games.Quiz.GetQuestions(games.Quiz, "warcraft-lore"))

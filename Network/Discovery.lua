@@ -1,11 +1,14 @@
-local _, Quiz = ...
-local PREFIX = "ORBITQUIZDISC8"
-local WIRE_VERSION = "8"
-local LOBBY_NAME = "OrbitQuizLobby"
+local _, Games = ...
+local PREFIX = "ORBITGAMESDISC2"
+local WIRE_VERSION = "2"
+local LOBBY_NAME = "OrbitGamesLobby"
 local MAX_PACKET_BYTES = 255
 local MAX_SESSION_BYTES = 64
-local MAX_PACK_BYTES = 64
-local MAX_LEAGUE_BYTES = 48
+local MAX_GAME_TYPE_BYTES = 32
+local MAX_ACTIVITY_ID_BYTES = 32
+local MAX_TITLE_BYTES = 64
+local MAX_DESCRIPTION_BYTES = 48
+local MAX_PROTOCOL_VERSION = 2147483647
 local MAX_HOSTS = 32
 local MAX_PLAYERS = 17
 local MAX_QUEUE = 32
@@ -24,12 +27,19 @@ local SEND_INTERVAL = 1
 local TICK_INTERVAL = 1
 local RETRY_INTERVAL = 2
 local HOST_STATES = { ready = true, posting = true, open = true, results = true, paused = true }
+local BROADCAST_ROUTES = {
+    { audience = "server", distribution = "CHANNEL" },
+    { audience = "guild", distribution = "GUILD" },
+    { audience = "party", distribution = "RAID" },
+    { audience = "party", distribution = "PARTY" },
+    { audience = "party", distribution = "INSTANCE_CHAT" },
+}
 
-Quiz.Discovery = { initialized = false, started = false }
-local Discovery = Quiz.Discovery
+Games.Discovery = { initialized = false, started = false }
+local Discovery = Games.Discovery
 
 local function IsBlocked()
-    return Quiz.Comms.suspended or Quiz.Main:IsRestricted()
+    return Games.Comms.suspended or Games.Main:IsRestricted()
 end
 
 local function Plain(value, maximum, allowBraces)
@@ -43,6 +53,14 @@ end
 
 local function Token(value)
     return Plain(value, MAX_SESSION_BYTES) and value:match("^[%w.%-]+$") ~= nil
+end
+
+local function GameTypeId(value)
+    return Plain(value, MAX_GAME_TYPE_BYTES) and value:match("^[a-z0-9][a-z0-9_-]*$") ~= nil
+end
+
+local function ActivityId(value)
+    return Plain(value, MAX_ACTIVITY_ID_BYTES) and value:match("^[a-z0-9][a-z0-9_-]*$") ~= nil
 end
 
 local function ClearQueue(self)
@@ -166,46 +184,71 @@ local function Enqueue(self, message, distribution, target, kind, now)
     return true
 end
 
-local function Broadcast(self, message, kind, now)
+local function Broadcast(self, message, kind, now, audiences)
     local routed = false
-    for _, distribution in ipairs({ "CHANNEL", "GUILD", "RAID", "PARTY", "INSTANCE_CHAT" }) do
-        if HasRoute(self, distribution) then
-            routed = Enqueue(self, message, distribution, nil, kind, now) or routed
+    for _, route in ipairs(BROADCAST_ROUTES) do
+        if (not audiences or audiences[route.audience]) and HasRoute(self, route.distribution) then
+            routed = Enqueue(self, message, route.distribution, nil, kind, now) or routed
         end
     end
     return routed
 end
 
 local function HostedGame(self)
-    local session, game = Quiz.Session.hostSession, Quiz.Main.game
-    local state = game and (game.state == "finished" and Quiz.Main.finishPending and "results" or game.state)
-    if not session or session == self.withdrawnSession or not game or not HOST_STATES[state] then
+    local advert = Games.Main:GetHostedAdvert()
+    if not advert or advert.sessionId == self.withdrawnSession then
         return nil
     end
-    local packName = Quiz.L.ALL_PACKS
-    if game.settings.packId ~= "all" then
-        packName = game.settings.packId
-        for _, pack in ipairs(Quiz:GetQuestionPacks()) do
-            if pack.id == game.settings.packId then
-                packName = pack.title
-                break
-            end
-        end
-    end
-    local players = 1
-    for _ in pairs(Quiz.Session.peers) do
-        players = players + 1
-    end
     if
-        not Token(session)
-        or not Plain(packName, MAX_PACK_BYTES)
-        or not Plain(game.settings.league, MAX_LEAGUE_BYTES, true)
-        or players > MAX_PLAYERS
+        not Token(advert.sessionId)
+        or not GameTypeId(advert.gameTypeId)
+        or type(advert.protocolVersion) ~= "number"
+        or advert.protocolVersion < 1
+        or advert.protocolVersion > MAX_PROTOCOL_VERSION
+        or advert.protocolVersion % 1 ~= 0
+        or not ActivityId(advert.activityId)
+        or type(advert.activityVersion) ~= "number"
+        or advert.activityVersion < 1
+        or advert.activityVersion > MAX_PROTOCOL_VERSION
+        or advert.activityVersion % 1 ~= 0
+        or not Plain(advert.title, MAX_TITLE_BYTES)
+        or not Plain(advert.description, MAX_DESCRIPTION_BYTES, true)
+        or not HOST_STATES[advert.phase]
+        or type(advert.playerCount) ~= "number"
+        or advert.playerCount < 1
+        or advert.playerCount > MAX_PLAYERS
+        or advert.playerCount % 1 ~= 0
+        or type(advert.maxPlayers) ~= "number"
+        or advert.maxPlayers < 1
+        or advert.maxPlayers > MAX_PLAYERS
+        or advert.maxPlayers % 1 ~= 0
+        or advert.playerCount > advert.maxPlayers
+        or type(advert.joinable) ~= "boolean"
+        or advert.joinable and advert.playerCount >= advert.maxPlayers
     then
         self.lastError = "discovery_invalid_game"
         return nil
     end
-    return table.concat({ WIRE_VERSION, "A", session, packName, game.settings.league, state, players }, "|"), session
+    local message = table.concat({
+        WIRE_VERSION,
+        "A",
+        advert.sessionId,
+        advert.gameTypeId,
+        advert.protocolVersion,
+        advert.activityId,
+        advert.activityVersion,
+        advert.title,
+        advert.description,
+        advert.phase,
+        advert.playerCount,
+        advert.maxPlayers,
+        advert.joinable and "1" or "0",
+    }, "|")
+    if #message > MAX_PACKET_BYTES then
+        self.lastError = "discovery_invalid_game"
+        return nil
+    end
+    return message, advert.sessionId
 end
 
 local function SendNext(self, now)
@@ -267,7 +310,7 @@ function Discovery:Initialize()
     self.retired, self.retiredCount = {}, 0
     self.responders, self.responderCount = {}, 0
     self.sequence, self.joinAttempts = 0, 0
-    self.lastHostedSession, self.withdrawnSession = nil, nil
+    self.lastHostedSession, self.withdrawnSession, self.hostAudiences = nil, nil, nil
     self.lastAdvertAt, self.lastQueryAt = nil, nil
     self.pendingAdvert, self.queryAt, self.wasBlocked = false, nil, false
     self.lastError, self.lobbyReason, self.localName, self.lobbyConfirmed = nil, nil, nil, false
@@ -298,7 +341,7 @@ function Discovery:Start()
     local name, realm = UnitFullName("player")
     if not issecretvalue(name) and not issecretvalue(realm) and type(name) == "string" then
         self.localName =
-            Quiz.Identity:NormalizeName(type(realm) == "string" and realm ~= "" and name .. "-" .. realm or name)
+            Games.Identity:NormalizeName(type(realm) == "string" and realm ~= "" and name .. "-" .. realm or name)
     end
     self.started = true
     self.nextJoinAt = GetTime() + JOIN_DELAY
@@ -328,7 +371,7 @@ function Discovery:Probe(hostName)
     elseif IsBlocked() then
         return false, "discovery_restricted"
     end
-    local name = Quiz.Identity:NormalizeName(hostName)
+    local name = Games.Identity:NormalizeName(hostName)
     if not name or self.localName and name:lower() == self.localName:lower() then
         return false, "invalid_host_name"
     end
@@ -361,7 +404,8 @@ function Discovery:Advertise()
 end
 
 function Discovery:StopHost()
-    local session = self.lastHostedSession or Quiz.Session.hostSession
+    local session = self.lastHostedSession or Games.Main:GetHostedSessionId()
+    local audiences = self.hostAudiences or Games.Store:GetHostAudiences()
     self.pendingAdvert, self.lastHostedSession = false, nil
     self.withdrawnSession = session
     for key, entry in pairs(self.queue) do
@@ -371,8 +415,9 @@ function Discovery:StopHost()
         end
     end
     if self.started and session and not IsBlocked() then
-        Broadcast(self, WIRE_VERSION .. "|X|" .. session, "withdraw", GetTime())
+        Broadcast(self, WIRE_VERSION .. "|X|" .. session, "withdraw", GetTime(), audiences)
     end
+    self.hostAudiences = nil
 end
 
 function Discovery:Stop()
@@ -417,7 +462,7 @@ function Discovery:Receive(prefix, text, distribution, sender, target, _, localI
     then
         return false
     end
-    local name = Quiz.Identity:NormalizeName(sender)
+    local name = Games.Identity:NormalizeName(sender)
     if not name then
         return false
     end
@@ -433,7 +478,7 @@ function Discovery:Receive(prefix, text, distribution, sender, target, _, localI
             return false
         end
     elseif distribution == "WHISPER" then
-        local recipient = Quiz.Identity:NormalizeName(target)
+        local recipient = Games.Identity:NormalizeName(target)
         if not recipient or not self.localName or recipient:lower() ~= self.localName:lower() then
             return false
         end
@@ -466,43 +511,77 @@ function Discovery:Receive(prefix, text, distribution, sender, target, _, localI
     local stopped = text:match("^" .. WIRE_VERSION .. "|X|([%w.%-]+)$")
     local previous = self.games[key]
     if stopped and Token(stopped) then
-        if previous and previous.session == stopped then
+        if previous and previous.sessionId == stopped then
             self.games[key] = nil
             self.gameCount = self.gameCount - 1
             Retire(self, key, stopped, now)
         end
         return true
     end
-    local session, packName, league, state, playerText =
-        text:match("^" .. WIRE_VERSION .. "|A|([^|]*)|([^|]*)|([^|]*)|([^|]*)|([^|]*)$")
+    local sessionId, gameTypeId, protocolText, activityId, activityText, title, description, phase, playerText, maxPlayerText, joinableText =
+        text:match(
+            "^"
+                .. WIRE_VERSION
+                .. "|A|([^|]*)|([^|]*)|([^|]*)|([^|]*)|([^|]*)|([^|]*)|([^|]*)|([^|]*)|([^|]*)|([^|]*)|([^|]*)$"
+        )
+    local gameType = Games.GameTypes:Get(gameTypeId)
+    local protocolVersion = protocolText and tonumber(protocolText)
+    local activityVersion = activityText and tonumber(activityText)
     if
-        not Token(session)
-        or not Plain(packName, MAX_PACK_BYTES)
-        or not Plain(league, MAX_LEAGUE_BYTES, true)
-        or not HOST_STATES[state]
+        not Token(sessionId)
+        or not GameTypeId(gameTypeId)
+        or not gameType
+        or not protocolVersion
+        or protocolVersion ~= gameType.protocolVersion
+        or protocolVersion % 1 ~= 0
+        or not ActivityId(activityId)
+        or not activityVersion
+        or activityVersion < 1
+        or activityVersion > MAX_PROTOCOL_VERSION
+        or activityVersion % 1 ~= 0
+        or not Plain(title, MAX_TITLE_BYTES)
+        or not Plain(description, MAX_DESCRIPTION_BYTES, true)
+        or not HOST_STATES[phase]
         or not playerText:match("^%d%d?$")
+        or not maxPlayerText:match("^%d%d?$")
+        or joinableText ~= "0" and joinableText ~= "1"
     then
         return false
     end
     local players = tonumber(playerText)
-    if players < 1 or players > MAX_PLAYERS or self.retired[key] and self.retired[key].session == session then
+    local maxPlayers = tonumber(maxPlayerText)
+    local joinable = joinableText == "1"
+    if
+        players < 1
+        or maxPlayers < 1
+        or maxPlayers > MAX_PLAYERS
+        or players > maxPlayers
+        or joinable and players >= maxPlayers
+        or self.retired[key] and self.retired[key].session == sessionId
+    then
         return false
     end
     if not previous and self.gameCount >= MAX_HOSTS then
         return false
     end
-    if previous and previous.session ~= session then
-        Retire(self, key, previous.session, now)
+    if previous and previous.sessionId ~= sessionId then
+        Retire(self, key, previous.sessionId, now)
     elseif not previous then
         self.gameCount = self.gameCount + 1
     end
     self.games[key] = {
         hostName = name,
-        session = session,
-        packName = packName,
-        league = league,
-        state = state,
-        players = players,
+        sessionId = sessionId,
+        gameTypeId = gameTypeId,
+        protocolVersion = protocolVersion,
+        activityId = activityId,
+        activityVersion = activityVersion,
+        title = title,
+        description = description,
+        phase = phase,
+        playerCount = players,
+        maxPlayers = maxPlayers,
+        joinable = joinable,
         expiresAt = now + ENTRY_TTL,
     }
     return true
@@ -542,7 +621,10 @@ function Discovery:Tick(now)
     local advert, session = HostedGame(self)
     if advert and (self.pendingAdvert or session ~= self.lastHostedSession or now >= self.nextAdvertAt) then
         if not self.lastAdvertAt or now >= self.lastAdvertAt + QUERY_INTERVAL then
-            Broadcast(self, advert, "advert", now)
+            if session ~= self.lastHostedSession then
+                self.hostAudiences = Games.Store:GetHostAudiences()
+            end
+            Broadcast(self, advert, "advert", now, self.hostAudiences)
             self.pendingAdvert = false
             self.lastHostedSession = session
             self.lastAdvertAt = now

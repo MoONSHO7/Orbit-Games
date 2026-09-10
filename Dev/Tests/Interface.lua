@@ -1,5 +1,5 @@
 local PACK_ID = "interface-fixture"
-local PREFIX = "ORBITQUIZDISC8"
+local PREFIX = "ORBITGAMESDISC2"
 local FIRST_HOST = "Alpha-TestRealm"
 local SECOND_HOST = "Beta-TestRealm"
 local EPSILON = 0.000001
@@ -7,7 +7,7 @@ local WINDOW_SCROLLBAR_INSET_PIXELS = 10
 local HUD_SCROLLBAR_OFFSET_PIXELS = 4
 local SCROLLBAR_GRAB_WIDTH = 5
 local SCROLLBAR_ART_PIXELS = 2
-local TIMER_PIXELS = 2
+local TIMER_PIXELS = 4
 local TIMER_PROMPT_GAP_PIXELS = 2
 local TIMER_ANSWER_GAP = 8
 local TIMER_GRADIENT_SHADE = 0.65
@@ -16,9 +16,18 @@ local SCORE_GAP_PIXELS = 8
 local SCORE_RISE_PIXELS = 12
 local SCORE_ANIMATION_SECONDS = 2.2
 local SCORE_FADE_DELAY = 1.4
+local SCORE_TOTAL_FEEDBACK_ALPHA = 0.35
 local TEXT_SHADOW_PIXELS = 2
 local MIN_TEXT_HEIGHT = 16
 local WRAP_LINE_HEIGHT = 14.25
+local FOOTER_NOTICE_Y = 366
+local FOOTER_TOP_PADDING = 12
+local FOOTER_BOTTOM_PADDING = 12
+local FOOTER_BUTTON_HEIGHT = 20
+local FOOTER_SIDE_PADDING = 5
+local FOOTER_BUTTON_SPACING = 8
+local FOOTER_HEIGHT = FOOTER_TOP_PADDING + FOOTER_BUTTON_HEIGHT + FOOTER_BOTTOM_PADDING
+local GAME_LEAVE_WIDTH = 104
 local DRAKA_QUESTION = "In A Warrior Made, who sends young Draka to gather ingredients for a supposed cure?"
 local COLORS = {
     normal = { 1, 1, 1, 1 },
@@ -30,11 +39,14 @@ local COLORS = {
     timeout = { 1, 0.16, 0.08, 1 },
 }
 
-return function(Quiz)
+return function(Games)
+    local Quiz = Games.Quiz
     local assertions = 0
-    local UI, Widget, Main, Session = Quiz.UI, Quiz.Widget, Quiz.Main, Quiz.Session
+    local UI, Widget, Main, Session = Games.UI, Quiz.Widget, Games.Main, Quiz.Session
+    local HostPage = Quiz.HostPage
     local defaultRules = Quiz.Rules.Normalize()
     local defaultRulesKey = Quiz.Rules.Encode(defaultRules)
+    local timerTrackPixels, timerFillOverhangPixels = 2, 1
     local timerStartColor, timerEndColor
     local function Check(value, message)
         assertions = assertions + 1
@@ -61,7 +73,7 @@ return function(Quiz)
         Same(alpha, 1, "HUD text shadow is opaque black")
         local x, y = label:GetShadowOffset()
         local pixel = PixelUtil.GetPixelToUIUnitFactor() / label:GetEffectiveScale()
-        Near(x / pixel, -TEXT_SHADOW_PIXELS, "text shadow remains two physical pixels to the left")
+        Near(x / pixel, TEXT_SHADOW_PIXELS, "text shadow remains two physical pixels to the right")
         Near(y / pixel, -TEXT_SHADOW_PIXELS, "text shadow remains two physical pixels downward")
         Same(label.fontCalls, nil, "rendered HUD labels never inline font files on their FontStrings")
         local fontX, fontY = font:GetShadowOffset()
@@ -70,6 +82,7 @@ return function(Quiz)
     end
     local function HUDTextShadows()
         TextShadow(Widget.prompt)
+        TextShadow(Widget.scoreValueText)
         TextShadow(Widget.scoreText)
         TextShadow(Widget.packText)
         TextShadow(Widget.winnerText)
@@ -104,6 +117,84 @@ return function(Quiz)
         Check(button.enabled, "the player can click the enabled control")
         button.scripts.OnClick(button)
     end
+    local function FooterGrid(page, visible, hidden, message)
+        local footer = page.footer
+        Same(footer:GetParent(), UI.modePages[Quiz.id].host, message .. " footer belongs to the Quiz Host body")
+        Check(footer.hasButtons and footer:IsShown(), message .. " exposes its populated footer")
+        Check(UI.footerDivider:IsShown(), message .. " exposes the shared footer divider")
+        Near(footer:GetTop(), UI.footerDivider:GetTop(), message .. " footer starts at the shared divider")
+        local scale = footer:GetEffectiveScale()
+        local top = PixelUtil.GetNearestPixelSize(FOOTER_TOP_PADDING, scale)
+        local bottom = PixelUtil.GetNearestPixelSize(FOOTER_BOTTOM_PADDING, scale)
+        local height = PixelUtil.GetNearestPixelSize(FOOTER_BUTTON_HEIGHT, scale)
+        local side = PixelUtil.GetNearestPixelSize(FOOTER_SIDE_PADDING, scale)
+        local spacing = PixelUtil.GetNearestPixelSize(FOOTER_BUTTON_SPACING, scale)
+        Near(
+            footer:GetHeight(),
+            PixelUtil.GetNearestPixelSize(FOOTER_HEIGHT, scale),
+            message .. " footer has Orbit height"
+        )
+        for index, button in ipairs(visible) do
+            Same(button:GetParent(), footer, message .. " button stays inside its mode footer")
+            Check(button:IsShown(), message .. " shows button " .. index)
+            Near(button:GetHeight(), height, message .. " button uses Orbit footer height")
+            Near(button:GetWidth(), visible[1]:GetWidth(), message .. " buttons share one width")
+            Near(footer:GetTop() - button:GetTop(), top, message .. " button uses Orbit top padding")
+            Near(button:GetBottom() - footer:GetBottom(), bottom, message .. " button uses Orbit bottom padding")
+            if index > 1 then
+                Check(
+                    math.abs(button:GetLeft() - visible[index - 1]:GetRight() - spacing)
+                        <= PixelUtil.GetPixelToUIUnitFactor() / scale + EPSILON,
+                    message .. " buttons keep authored spacing within one physical pixel"
+                )
+            end
+        end
+        Near(visible[1]:GetLeft() - footer:GetLeft(), side, message .. " first button uses Orbit side padding")
+        Near(footer:GetRight() - visible[#visible]:GetRight(), side, message .. " last button uses Orbit side padding")
+        for index, button in ipairs(hidden) do
+            Same(button:GetParent(), footer, message .. " inactive button remains owned by the footer")
+            Check(not button:IsShown(), message .. " hides inactive button " .. index)
+        end
+    end
+    local function GamesFooter(message)
+        local footer = UI.gamesFooter
+        Same(footer:GetParent(), UI.pages.play, message .. " footer belongs to the Games page")
+        Check(footer.hasButtons and footer:IsVisible(), message .. " footer exposes the session action")
+        Check(UI.footerDivider:IsShown(), message .. " footer exposes the shared divider")
+        Check(not HostPage.footer:IsVisible(), message .. " hides the selected mode's Host footer")
+        Near(footer:GetTop(), UI.footerDivider:GetTop(), message .. " footer starts at the shared divider")
+        local scale = footer:GetEffectiveScale()
+        local pixel = PixelUtil.GetPixelToUIUnitFactor() / scale
+        local top = PixelUtil.GetNearestPixelSize(FOOTER_TOP_PADDING, scale)
+        local bottom = PixelUtil.GetNearestPixelSize(FOOTER_BOTTOM_PADDING, scale)
+        local height = PixelUtil.GetNearestPixelSize(FOOTER_BUTTON_HEIGHT, scale)
+        local side = PixelUtil.GetNearestPixelSize(FOOTER_SIDE_PADDING, scale)
+        local spacing = PixelUtil.GetNearestPixelSize(FOOTER_BUTTON_SPACING, scale)
+        Near(footer:GetHeight(), PixelUtil.GetNearestPixelSize(FOOTER_HEIGHT, scale), message .. " footer height")
+        Same(UI.currentViewport:GetParent(), footer, message .. " status viewport belongs to the footer")
+        Same(UI.current:GetParent(), UI.currentViewport, message .. " status text belongs to its clipping viewport")
+        Same(UI.leave:GetParent(), footer, message .. " Leave action belongs to the footer")
+        Near(UI.currentViewport:GetHeight(), height, message .. " status uses the footer row height")
+        Near(UI.current:GetHeight(), height, message .. " status text cannot grow the footer row")
+        Near(UI.leave:GetHeight(), height, message .. " action uses the footer button height")
+        Near(UI.leave:GetWidth(), PixelUtil.GetNearestPixelSize(GAME_LEAVE_WIDTH, scale), message .. " action width")
+        Near(footer:GetTop() - UI.currentViewport:GetTop(), top, message .. " status uses Orbit top padding")
+        Near(footer:GetTop() - UI.leave:GetTop(), top, message .. " action uses Orbit top padding")
+        Check(
+            math.abs(UI.currentViewport:GetBottom() - footer:GetBottom() - bottom) <= pixel + EPSILON,
+            message .. " status keeps Orbit bottom padding within one physical pixel"
+        )
+        Check(
+            math.abs(UI.leave:GetBottom() - footer:GetBottom() - bottom) <= pixel + EPSILON,
+            message .. " action keeps Orbit bottom padding within one physical pixel"
+        )
+        Near(UI.currentViewport:GetLeft() - footer:GetLeft(), side, message .. " status uses Orbit side padding")
+        Near(footer:GetRight() - UI.leave:GetRight(), side, message .. " action uses Orbit side padding")
+        Check(
+            math.abs(UI.leave:GetLeft() - UI.currentViewport:GetRight() - spacing) <= pixel + EPSILON,
+            message .. " footer regions keep authored spacing within one physical pixel"
+        )
+    end
     local function SelectDropdown(button, value)
         Check(button:IsEnabled(), "the native dropdown is enabled")
         button:GetScript("OnMouseDown")(button, "LeftButton")
@@ -122,6 +213,27 @@ return function(Quiz)
             end
         end
         Check(false, "requested value is offered by the native dropdown")
+    end
+    local function ToggleCheckbox(button, value)
+        Check(button:IsEnabled(), "the native multi-select is enabled")
+        if not button:IsMenuOpen() then
+            button:GetScript("OnMouseDown")(button, "LeftButton")
+            button:GetScript("OnMouseUp")(button, "LeftButton")
+        end
+        Check(button:IsMenuOpen(), "the native mouse handler opens the multi-select")
+        Same(button.menu.owner, button, "Blizzard menu is anchored to its multi-select owner")
+        local root = button:GetMenuDescription()
+        Same(root:GetMinimumWidth(), button:GetWidth(), "native multi-select uses the owner width minimum")
+        for _, entry in ipairs(root.entries) do
+            if entry:GetData() == value then
+                Check(entry:IsCheckbox(), "multi-select choice uses the native checkbox contract")
+                Check(not entry:IsRadio(), "multi-select choice is never presented as a radio")
+                Check(entry:Pick(), "native checkbox response toggles the requested value")
+                Check(button:IsMenuOpen(), "native checkbox response keeps its menu open")
+                return
+            end
+        end
+        Check(false, "requested value is offered by the native multi-select")
     end
     local function NativeButton(button)
         Same(button.template, "UIPanelButtonTemplate", "setup commands retain the native button art")
@@ -159,6 +271,7 @@ return function(Quiz)
         end
         local allowed = {
             [Widget.prompt] = true,
+            [Widget.scoreValueText] = true,
             [Widget.scoreText] = true,
             [Widget.packText] = true,
             [Widget.winnerText] = true,
@@ -183,54 +296,82 @@ return function(Quiz)
                 end
             end
         end
-        Same(count, 13, "HUD owns ten quiz labels, two toast labels and one hidden font-asset probe")
+        Same(count, 14, "HUD owns eleven quiz labels, two toast labels and one hidden font-asset probe")
         Same(Widget.fontProbe:IsShown(), false, "native font validation probe never appears in the HUD")
-        Same(Widget.scoreText.kind, "FontString", "personal score uses only a text region")
-        Same(Widget.scoreText:GetParent(), Widget.content, "floating score is outside the clipped question body")
+        Same(Widget.scoreRegion.kind, "Frame", "score hover uses one transparent owned region")
+        Same(Widget.scoreRegion:GetParent(), Widget.content, "score region is outside the clipped question body")
+        Same(Widget.scoreValueText.kind, "FontString", "permanent score uses only a text region")
+        Same(Widget.scoreValueText:GetParent(), Widget.scoreRegion, "permanent score belongs to its hover region")
+        Same(Widget.scoreText.kind, "FontString", "score delta uses only a text region")
+        Same(Widget.scoreText:GetParent(), Widget.scoreRegion, "floating delta overlays the permanent score region")
         Same(
-            Widget.scoreText:GetFontObject(),
+            Widget.scoreValueText:GetFontObject(),
             Widget.choices[1].Text:GetFontObject(),
-            "personal score uses the answer-size font"
+            "permanent score uses the answer-size font"
         )
-        Same(Widget.scoreText.justifyH, "RIGHT", "personal score aligns at the right edge")
-        Same(Widget.scoreText.justifyV, "TOP", "personal score begins at the top of its reserved space")
-        Same(Widget.scoreText.wordWrap, false, "short signed score never wraps onto a second line")
-        Same(Widget.scoreText:GetMaxLines(), 1, "personal score occupies one line")
-        Same(Widget.scoreText:GetScript("OnClick"), nil, "personal score cannot submit an answer")
-        Same(Widget.scoreText:GetScript("OnUpdate"), nil, "personal score needs no Lua animation loop")
-        Same(Widget.scoreAnimation:GetParent(), Widget.scoreText, "native animation belongs to the reusable score text")
+        Same(Widget.scoreText:GetFontObject(), Widget.scoreValueText:GetFontObject(), "score roles share one font role")
+        for _, label in ipairs({ Widget.scoreValueText, Widget.scoreText }) do
+            Same(label.justifyH, "RIGHT", "score text aligns at the right edge")
+            Same(label.justifyV, "TOP", "score text begins at the top of its reserved space")
+            Same(label.wordWrap, false, "short score text never wraps onto a second line")
+            Same(label:GetMaxLines(), 1, "each score role occupies one line")
+            Same(label:GetScript("OnClick"), nil, "score text cannot submit an answer")
+            Same(label:GetScript("OnUpdate"), nil, "score text needs no Lua animation loop")
+        end
+        Check(
+            Widget.scoreRegion:GetScript("OnEnter") and Widget.scoreRegion:GetScript("OnLeave"),
+            "the transparent score region owns its hover lifecycle"
+        )
+        Same(Widget.scoreRegion:GetScript("OnClick"), nil, "the score region cannot submit an answer")
+        Same(Widget.scoreRegion:GetScript("OnDragStart"), nil, "the score region cannot initiate HUD movement")
+        Same(Widget.scoreRegion:GetScript("OnDragStop"), nil, "the score region cannot finish HUD movement")
+        Same(Widget.scoreAnimation:GetParent(), Widget.scoreText, "native animation belongs only to the delta text")
         Same(#Widget.scoreAnimation.animations, 2, "only one rise and one fade are allocated")
         Same(Widget.scoreAnimation:GetLooping(), "NONE", "personal score animation is a one-shot")
         Same(Widget.scoreAnimation:GetScript("OnUpdate"), nil, "native animation uses no extra Lua update callback")
     end
     local function ScoreHidden(message)
-        Same(Widget.scoreText:IsShown(), false, message .. ": text stays hidden")
+        Same(Widget.scoreText:IsShown(), false, message .. ": delta stays hidden")
         Same(Widget.scoreAnimation:IsPlaying(), false, message .. ": animation is stopped")
+        Same(Widget.scoreValueText:GetAlpha(), 1, message .. ": permanent total restores full opacity")
+    end
+    local function ScoreTotal(total, interactive, message)
+        Same(Widget.scoreRegion:IsShown(), true, message .. ": score region stays visible")
+        Same(Widget.scoreValueText:IsShown(), true, message .. ": permanent total stays visible")
+        Same(Widget.scoreValueText:GetText(), string.format("%.1f", total), message .. ": cumulative score is shown")
+        Same(Widget.scoreValueText:GetAlpha(), 1, message .. ": idle total stays fully opaque")
+        Same(Widget.scoreRegion.mouse, interactive == true, message .. ": hover follows live-session availability")
     end
     local function ScoreGeometry()
-        local label = Widget.scoreText
+        local region, totalLabel, deltaLabel = Widget.scoreRegion, Widget.scoreValueText, Widget.scoreText
+        local label = totalLabel
         local pixel = PixelUtil.GetPixelToUIUnitFactor() / label:GetEffectiveScale()
-        Near(label:GetRight(), Widget.content:GetRight(), "personal score starts at the content right edge")
+        Near(region:GetRight(), Widget.content:GetRight(), "score region starts at the content right edge")
         local promptOffset = Widget.prompt.point[5]
         Near(
-            label:GetTop(),
+            region:GetTop(),
             Widget.content:GetTop() + promptOffset,
-            "personal score stays beside the question's unscrolled top, below the pack label"
+            "score region stays beside the question's unscrolled top, below the pack label"
         )
+        Near(totalLabel:GetRight(), region:GetRight(), "permanent total is right-pinned inside the score region")
+        Near(deltaLabel:GetRight(), region:GetRight(), "animated delta shares the permanent total's right edge")
+        Near(totalLabel:GetTop(), region:GetTop(), "permanent total starts at the score region top")
+        Near(deltaLabel:GetTop(), region:GetTop(), "animated delta overlays the permanent total")
+        Near(totalLabel:GetWidth(), region:GetWidth(), "permanent total consumes the reserved score width")
+        Near(deltaLabel:GetWidth(), region:GetWidth(), "animated delta consumes the reserved score width")
         local scoreWidth = PixelUtil.GetNearestPixelSize(SCORE_WIDTH, label:GetEffectiveScale())
-        if scoreWidth < SCORE_WIDTH then
-            scoreWidth = scoreWidth + pixel
+        Check(region:GetWidth() + EPSILON >= scoreWidth, "score region retains its minimum right-side width")
+        for _, scoreLabel in ipairs({ totalLabel, deltaLabel }) do
+            Check(
+                region:GetWidth() + EPSILON
+                    >= scoreLabel:GetUnboundedStringWidthForText(scoreLabel:GetText()) + TEXT_SHADOW_PIXELS * pixel,
+                "score region fits the rendered total and delta with shadow padding"
+            )
         end
-        local scoreLimit = math.max(1, Widget.content:GetWidth() - SCORE_GAP_PIXELS * pixel - MIN_TEXT_HEIGHT)
         Near(
-            label:GetWidth(),
-            PixelUtil.GetNearestPixelSize(math.min(scoreWidth, scoreLimit), label:GetEffectiveScale()),
-            "score reserves a bounded right-side width before a result exists"
-        )
-        Near(
-            (label:GetLeft() - Widget.prompt:GetRight()) / pixel,
-            SCORE_GAP_PIXELS + 1,
-            "question wrapping reserves the eight-pixel score gutter plus one pixel for pressed text"
+            (region:GetLeft() - Widget.prompt:GetRight()) / pixel,
+            SCORE_GAP_PIXELS + TEXT_SHADOW_PIXELS + 1,
+            "question wrapping reserves the score gutter, rightward shadow, and pressed text"
         )
         Near(
             (Widget.questionScroll:GetWidth() - Widget.prompt:GetWidth()) / pixel,
@@ -239,16 +380,22 @@ return function(Quiz)
         )
         Near(Widget.timer:GetWidth(), Widget.prompt:GetWidth(), "timer fills the narrowed text column")
         Check(
-            Widget.questionScroll.ScrollBar.Track:GetRight() < label:GetLeft(),
-            "thin HUD scroll art remains inside the gap without crossing the personal-score column"
+            Widget.questionScroll.ScrollBar.Track:GetRight() < region:GetLeft(),
+            "thin HUD scroll art remains inside the gap without crossing the score region"
         )
     end
     local function ScoreShown(points)
-        local label, animation = Widget.scoreText, Widget.scoreAnimation
-        Same(label:IsShown(), true, "confirmed nonzero result shows the personal score")
-        Same(label:GetText(), string.format("%+.1f", points), "personal score shows the signed round delta, not total")
+        local view = Session:GetView()
+        local totalLabel, label, animation = Widget.scoreValueText, Widget.scoreText, Widget.scoreAnimation
+        Same(Widget.scoreRegion:IsShown(), true, "confirmed result retains the permanent score region")
+        Same(totalLabel:IsShown(), true, "confirmed result keeps the current total visible")
+        Same(totalLabel:GetText(), string.format("%.1f", view.score), "permanent score shows the cumulative total")
+        Color(totalLabel, COLORS.normal, "permanent total stays white during feedback")
+        Near(totalLabel:GetAlpha(), SCORE_TOTAL_FEEDBACK_ALPHA, "active delta dims but never hides the total")
+        Same(label:IsShown(), true, "confirmed nonzero result shows the signed delta")
+        Same(label:GetText(), string.format("%+.1f", points), "feedback shows the signed round delta, not total")
         Color(label, points > 0 and COLORS.correct or COLORS.incorrect, "personal gain/loss uses its result color")
-        Same(label:GetAlpha(), 1, "every new personal result starts fully opaque")
+        Same(label:GetAlpha(), 1, "every new personal delta starts fully opaque")
         Same(animation:IsPlaying(), true, "confirmed result starts native animation playback")
         Near(animation:GetDuration(), SCORE_ANIMATION_SECONDS, "rise and fade complete together after 2.2 seconds")
         Same(Widget.scoreRise.kind, "Translation", "result movement uses a native Translation")
@@ -264,8 +411,8 @@ return function(Quiz)
             "the fade occupies the final eight tenths of a second"
         )
         Same(Widget.scoreRise:GetOrder(), Widget.scoreFade:GetOrder(), "rise and delayed fade run in parallel")
-        Check(animation:GetScript("OnFinished"), "natural completion owns hiding the personal score")
-        Check(animation:GetScript("OnStop"), "cancelling native animation also hides its score")
+        Check(animation:GetScript("OnFinished"), "natural completion hides the delta and restores the total")
+        Check(animation:GetScript("OnStop"), "cancelling native animation hides the delta and restores the total")
         local x, y = Widget.scoreRise:GetOffset()
         local pixel = PixelUtil.GetPixelToUIUnitFactor() / label:GetEffectiveScale()
         Same(x, 0, "result rises without crossing the reserved horizontal gutter")
@@ -340,6 +487,8 @@ return function(Quiz)
         Same(maximum, duration or 15, "countdown maximum follows this question's pack rules")
         Same(Widget.timer:GetStatusBarTexture(), Widget.timer.Fill, "bar is filled by its owned native texture")
         Same(Widget.timer.Fill:GetParent(), Widget.timer, "bar fill is owned by the status bar")
+        Same(Widget.timer.Track:GetParent(), Widget.timer, "countdown track is owned by the status bar")
+        Check(Widget.timer.Track:IsVisible(), "countdown track remains visible behind the fill")
         Check(Widget.timer.Fill.color, "timer fill uses a color texture")
         Same(Widget.timer.Fill.atlas, nil, "timer fill needs no atlas art")
         Same(#(Widget.timer.fontStrings or {}), 0, "timer never creates a numeric label")
@@ -347,22 +496,45 @@ return function(Quiz)
         Near(
             Widget.timer:GetHeight() * Widget.timer:GetEffectiveScale() / PixelUtil.GetPixelToUIUnitFactor(),
             TIMER_PIXELS,
-            "timer remains exactly two physical pixels tall"
+            "timer fill remains exactly four physical pixels tall"
+        )
+        Near(
+            Widget.timer.Track:GetHeight() * Widget.timer.Track:GetEffectiveScale() / PixelUtil.GetPixelToUIUnitFactor(),
+            timerTrackPixels,
+            "timer backdrop remains exactly two physical pixels tall"
         )
         Near(Widget.timer:GetWidth(), Widget.prompt:GetWidth(), "timer spans the question text column")
         Near(Widget.timer:GetLeft(), Widget.prompt:GetLeft(), "timer aligns with the prompt's left edge")
+        Near(Widget.timer.Track:GetLeft(), Widget.timer:GetLeft(), "timer backdrop shares the fill's left edge")
+        Near(Widget.timer.Track:GetRight(), Widget.timer:GetRight(), "timer backdrop shares the fill's right edge")
         Near(
-            (Widget.prompt:GetBottom() - Widget.timer:GetTop())
+            (Widget.prompt:GetBottom() - Widget.timer.Track:GetTop())
                 * Widget.timer:GetEffectiveScale()
                 / PixelUtil.GetPixelToUIUnitFactor(),
             TIMER_PROMPT_GAP_PIXELS,
-            "countdown sits exactly two physical pixels beneath the prompt"
+            "countdown backdrop stays exactly two physical pixels beneath the prompt"
         )
-        local left, bottom, width, height = Widget.timer:GetScaledRect()
+        Near(
+            (Widget.timer:GetTop() - Widget.timer.Track:GetTop())
+                * Widget.timer:GetEffectiveScale()
+                / PixelUtil.GetPixelToUIUnitFactor(),
+            timerFillOverhangPixels,
+            "timer fill extends one physical pixel above the backdrop"
+        )
+        Near(
+            (Widget.timer.Track:GetBottom() - Widget.timer:GetBottom())
+                * Widget.timer:GetEffectiveScale()
+                / PixelUtil.GetPixelToUIUnitFactor(),
+            timerFillOverhangPixels,
+            "timer fill extends one physical pixel below the backdrop"
+        )
         local factor = PixelUtil.GetPixelToUIUnitFactor()
-        for _, edge in ipairs({ left, left + width, bottom, bottom + height }) do
-            local pixels = edge / factor
-            Near(pixels, math.floor(pixels + 0.5), "each timer edge lands on the physical pixel grid")
+        for _, region in ipairs({ Widget.timer, Widget.timer.Track }) do
+            local left, bottom, width, height = region:GetScaledRect()
+            for _, edge in ipairs({ left, left + width, bottom, bottom + height }) do
+                local pixels = edge / factor
+                Near(pixels, math.floor(pixels + 0.5), "each timer and backdrop edge lands on the pixel grid")
+            end
         end
     end
     local function SingleColumn()
@@ -404,9 +576,9 @@ return function(Quiz)
     end
     local function Advertise(name, session, players)
         Check(
-            Quiz.Discovery:Receive(
+            Games.Discovery:Receive(
                 PREFIX,
-                "8|A|" .. session .. "|Test pack|Default|open|" .. players,
+                "2|A|" .. session .. "|quiz|2|quiz|1|Test pack|Default|open|" .. players .. "|17|1",
                 "GUILD",
                 name,
                 "",
@@ -438,7 +610,7 @@ return function(Quiz)
         )
     end
     local function WindowScrollbarEdges()
-        for _, scroll in ipairs({ UI.gamesScroll, UI.boardScroll }) do
+        for _, scroll in ipairs({ UI.gamesScroll, Quiz.ScoreView.scroll }) do
             local bar = scroll.ScrollBar
             local scale = bar:GetEffectiveScale()
             local inset = (UI.frame:GetRight() - bar.Track:GetRight()) * scale
@@ -473,7 +645,7 @@ return function(Quiz)
 
     Same(_G.Orbit, nil, "the addon is exercised without Orbit installed")
     Check(
-        Quiz:RegisterQuestionPack({
+        Quiz:RegisterPack({
             id = PACK_ID,
             title = "Interface test pack",
             questions = {
@@ -494,9 +666,20 @@ return function(Quiz)
         "interface fixture pack registers"
     )
 
+    local createModePages = UI.CreateModePages
+    local constructionRefreshes = 0
+    UI.CreateModePages = function(self)
+        constructionRefreshes = constructionRefreshes + 1
+        Check(not self.frame:IsShown(), "setup root stays hidden while mode controls are incomplete")
+        Main:RefreshPresenters()
+        createModePages(self)
+    end
     UI:Toggle()
-    Same(UI.boardScope, "personal", "Scores defaults to the player's per-pack progress")
-    Same(_G.OrbitQuizHostFrame, UI.frame, "setup has the named frame used by Escape")
+    UI.CreateModePages = createModePages
+    Same(constructionRefreshes, 1, "presenter refreshes during setup construction are safely deferred")
+    Same(Quiz.ScoreView.scope, "personal", "Scores defaults to personal quiz history")
+    Same(UI.tabs.results:GetText(), Quiz.L.RESULTS_TITLE, "Quiz owns the shared results tab title")
+    Same(_G.OrbitGamesHostFrame, UI.frame, "setup has the named frame used by Escape")
     Check(UI.frame:IsShown(), "setup opens from the primary entry point")
     Check(UI.frame.Chrome and UI.frame.Chrome.Background, "setup owns an Orbit-style chrome texture")
     Same(UI.frame.Chrome.Background.atlas, "housing-basic-container", "setup uses the real Orbit dialog atlas")
@@ -530,7 +713,7 @@ return function(Quiz)
         end
     end
     local dividers = 0
-    for divider in pairs(Quiz.Controls.dividers) do
+    for divider in pairs(Games.Controls.dividers) do
         if divider:GetParent() == UI.frame then
             dividers = dividers + 1
             Same(divider.Left.gradient[1], "HORIZONTAL", "dialog divider fades horizontally")
@@ -540,7 +723,39 @@ return function(Quiz)
             Same(divider.Right.gradient[3].a, 0, "right divider fades out at its edge")
         end
     end
-    Check(dividers >= 2, "settings dialog has tapered header and footer dividers")
+    Check(dividers >= 2, "settings dialog owns tapered header and conditional footer dividers")
+    Check(UI.headerDivider:IsShown(), "the header divider remains visible on every tab")
+    GamesFooter("Games")
+    Games.Controls:SetScrollingText(
+        UI.currentViewport,
+        Games.L.W_REJOINING_SESSION_F:format(string.rep("N", 120)),
+        true
+    )
+    Same(UI.currentViewport.clipsChildren, true, "a long Games status is clipped to its footer cell")
+    Same(UI.current.wordWrap, false, "a long Games status never wraps onto another line")
+    Same(UI.current.nonSpaceWrap, false, "a long Games identity never wraps inside a word")
+    Check(UI.currentViewport.animation:IsPlaying(), "an overflowing Games status scrolls inside its footer cell")
+    Check(
+        UI.currentViewport:GetRight() < UI.leave:GetLeft(),
+        "an overflowing Games status cannot enter the Leave action"
+    )
+    UI:Refresh()
+    Same(UI.current:GetText(), Games.L.W_NO_SESSION, "ordinary refresh restores the current session status")
+    Check(not UI.currentViewport.animation:IsPlaying(), "a fitting Games status stops the overflow animation")
+    Check(not UI.notice:IsShown(), "Games opens without passive setup subtext")
+    UI.actionError = "Games-action diagnostic"
+    UI:Refresh()
+    Check(UI.notice:IsShown(), "a real Games action error uses the notice lane")
+    Near(
+        UI.frame:GetTop() - UI.notice:GetTop(),
+        PixelUtil.GetNearestPixelSize(FOOTER_NOTICE_Y, UI.notice:GetEffectiveScale()),
+        "Games errors sit above the footer divider"
+    )
+    Check(UI.gamesScroll:GetBottom() >= UI.notice:GetTop(), "Games errors stay below the discovered-game list")
+    Check(UI.notice:GetBottom() > UI.gamesFooter:GetTop(), "Games errors stay clear of the footer")
+    UI.actionError = nil
+    UI:Refresh()
+    Check(not UI.notice:IsShown(), "clearing a Games action error restores the lean browser")
     RaisedDivider()
     WindowScrollbarEdges()
     Check(Widget.frame:IsShown() and Widget.editing, "setup opens a draggable idle preview")
@@ -556,7 +771,7 @@ return function(Quiz)
     Same(Widget.content.background, nil, "live question content has no window backdrop")
     SetupShadowsUnchanged()
     do
-        local labels = { Widget.prompt, Widget.scoreText, Widget.packText, Widget.winnerText }
+        local labels = { Widget.prompt, Widget.scoreValueText, Widget.scoreText, Widget.packText, Widget.winnerText }
         for _, choice in ipairs(Widget.choices) do
             labels[#labels + 1] = choice.Text
         end
@@ -595,6 +810,7 @@ return function(Quiz)
     TimerGradient(15)
     Same(Widget.timer:GetScript("OnUpdate"), nil, "idle preview does not run an animation")
     ScoreHidden("idle preview never awards a personal score")
+    ScoreTotal(0, false, "idle preview")
     for index, choice in ipairs(Widget.choices) do
         Same(choice:IsShown(), index <= 4, "idle preview shows only its four example answers")
         Same(choice.enabled, false, "preview answers cannot be clicked")
@@ -609,24 +825,48 @@ return function(Quiz)
         end
     end
     for _, name in ipairs(UISpecialFrames) do
-        Check(name ~= "OrbitQuizWidgetFrame", "Escape cannot dismiss the required live HUD")
+        Check(name ~= "OrbitGamesQuizWidgetFrame", "Escape cannot dismiss the required live HUD")
     end
     UI:SetTab("host")
-    SelectDropdown(UI.pack, PACK_ID)
-    for _, edit in ipairs({ UI.league }) do
-        Same(edit.autoFocus, false, "setup never takes typing focus automatically")
-        Same(edit.template, "BackdropTemplate", "edit control includes native backdrop support")
-        Same(edit.backdrop.bgFile, 130937, "edit uses Orbit's ChatBackground asset")
-        Same(edit.backdrop.edgeFile, 137057, "edit uses Orbit's tooltip border asset")
-        Same(edit.backdrop.edgeSize, 16, "edit uses the native inset border size")
-        Same(edit.backdrop.insets.left, 3, "edit preserves the Orbit backdrop inset")
-        Same(edit.font, "ChatFontNormal", "edit uses Orbit's normal chat font")
-        Same(edit.backdropColor[1], 0, "edit has a black inset background")
-        Same(edit.backdropColor[4], 0.5, "edit background has Orbit's half opacity")
-        Same(edit.backdropBorderColor[1], 0.5, "edit border is muted gray")
-        Same(edit.background, nil, "edit has no extra flat-fill texture")
-        Same(edit.edges, nil, "edit has no extra rectangular border")
+    Check(UI.footerDivider:IsShown(), "Host shows its footer divider with the action buttons")
+    Check(not UI.gamesFooter:IsVisible(), "Host hides the Games footer")
+    Same(UI.hostTo:GetParent(), UI.pages.host, "Host-to belongs to the shared Host page")
+    Check(UI.hostTo:GetTop() > UI.gameType:GetTop(), "Host-to appears above Game type")
+    Check(UI.hostTo:GetBottom() > UI.gameType:GetTop(), "Host-to never overlaps Game type")
+    for gameTypeId, pages in pairs(UI.modePages) do
+        Check(
+            UI.gameType:GetBottom() > pages.host:GetTop(),
+            "Game type remains above the " .. gameTypeId .. " Host body"
+        )
     end
+    Same(UI.hostTo.Background.atlas, "common-dropdown-textholder", "Host-to uses Blizzard dropdown art")
+    Same(UI.hostTo:GetText(), "Server, Guild, Party", "Host-to defaults to every supported audience")
+    UI.hostTo:OpenMenu()
+    local audienceIds = { "server", "guild", "party" }
+    for index, entry in ipairs(UI.hostTo:GetMenuDescription().entries) do
+        Same(entry:GetData(), audienceIds[index], "Host-to keeps its authored option order")
+        Check(entry:IsCheckbox(), "Host-to option " .. index .. " is a native checkbox")
+        Check(entry:IsSelected(), "Host-to option " .. index .. " starts selected")
+    end
+    ToggleCheckbox(UI.hostTo, "guild")
+    Same(UI.hostTo:GetText(), "Server, Party", "checkbox selection updates the collapsed Host-to text")
+    Same(Games.Store:GetHostAudiences().guild, false, "Host-to saves a deselected guild audience immediately")
+    ToggleCheckbox(UI.hostTo, "party")
+    Same(UI.hostTo:GetText(), "Server", "Host-to supports a single remaining audience")
+    local serverEntry
+    for _, entry in ipairs(UI.hostTo:GetMenuDescription().entries) do
+        if entry:GetData() == "server" then
+            serverEntry = entry
+        end
+    end
+    Check(serverEntry and not serverEntry:IsEnabled(), "the last selected Host-to audience is disabled")
+    Same(serverEntry:Pick(), false, "the last selected audience cannot be removed")
+    Same(UI.hostTo:GetText(), "Server", "rejected last-audience input leaves the selection unchanged")
+    ToggleCheckbox(UI.hostTo, "guild")
+    ToggleCheckbox(UI.hostTo, "party")
+    Same(UI.hostTo:GetText(), "Server, Guild, Party", "Host-to can restore every audience")
+    UI.hostTo:CloseMenu()
+    SelectDropdown(HostPage.pack, PACK_ID)
     for _, key in ipairs({
         "bridgeChat",
         "bridgeEnabled",
@@ -639,11 +879,40 @@ return function(Quiz)
     }) do
         Same(UI[key], nil, "visible chat control or binding is removed: " .. key)
     end
-    Check(UI.hostHelp:IsShown(), "pack-owned rule guidance is always visible in Host")
-    Check(UI.hostHelp:GetText():find(Quiz.L.W_RULES_OWNED, 1, true), "Host explains that the pack owns the rules")
-    Check(UI.hostHelp:GetText():find(Quiz.L.W_RULE_ENDLESS, 1, true), "Host explains this pack's repeating progression")
-    Check(UI.hostHelp:GetTop() < UI.durationInfo:GetBottom(), "guidance follows the pack's timing rules")
-    Check(UI.hostHelp:GetBottom() > UI.start:GetTop(), "guidance stays clear of the automatic game controls")
+    Same(HostPage.durationInfo, nil, "Host has no muted duration prose")
+    Same(HostPage.help, nil, "Host has no muted rule summary")
+    Check(HostPage.rules ~= nil, "Host retains the selected pack rules for eligibility")
+    Same(UI.notice:GetText(), "", "Host has no passive setup hint")
+    Check(not UI.notice:IsShown(), "Host hides its empty notice lane")
+    FooterGrid(HostPage, { HostPage.save, HostPage.start }, { HostPage.stop, HostPage.pause }, "idle Quiz")
+    UI:SetTab("settings")
+    Check(not UI.notice:IsShown(), "Settings has no passive setup subtext")
+    Same(UI.notice:GetText(), "", "Settings leaves the shared notice lane empty")
+    Check(not UI.footerDivider:IsShown(), "Settings hides the footer divider because it has no actions")
+    Check(not HostPage.footer:IsVisible(), "Settings shows no Host footer")
+    Check(not UI.gamesFooter:IsVisible(), "Settings shows no Games footer")
+    Same(Quiz.SettingsPage.help, nil, "Quiz Settings creates no muted explanatory block")
+    UI:SetTab("results")
+    Check(not UI.footerDivider:IsShown(), "Results hides the footer divider because it has no actions")
+    Check(not HostPage.footer:IsVisible(), "Results shows no Host footer")
+    Check(not UI.gamesFooter:IsVisible(), "Results shows no Games footer")
+    UI:SetTab("host")
+    Check(UI.footerDivider:IsShown(), "returning to Host restores its populated footer divider")
+    HostPage.draft.packId = "missing-interface-pack"
+    HostPage:RefreshRules()
+    UI:Refresh()
+    Same(HostPage.rules, nil, "an unavailable pack still fails Host eligibility")
+    Check(UI.notice:IsShown() and UI.notice:GetText() ~= "", "a real Host rule error uses the notice lane")
+    Near(
+        UI.frame:GetTop() - UI.notice:GetTop(),
+        PixelUtil.GetNearestPixelSize(FOOTER_NOTICE_Y, UI.notice:GetEffectiveScale()),
+        "Host errors sit above the footer divider"
+    )
+    Check(UI.notice:GetBottom() > HostPage.footer:GetTop(), "Host errors stay clear of the footer")
+    HostPage.draft.packId = PACK_ID
+    HostPage:RefreshRules()
+    UI:Refresh()
+    Check(not UI.notice:IsShown(), "clearing a Host rule error restores the lean page")
     for _, key in ipairs({
         "W_BRIDGE_OFF_BUTTON",
         "W_BRIDGE_ON_BUTTON",
@@ -654,9 +923,9 @@ return function(Quiz)
         "W_PUBLISH_SYNCING",
         "W_PUBLISH_PACING_F",
     }) do
-        Same(Quiz.L[key], nil, "removed bridge UI string is no longer registered: " .. key)
+        Same(Games.L[key], nil, "removed bridge UI string is no longer registered: " .. key)
     end
-    for _, button in ipairs({ UI.start, UI.pause, UI.stop, UI.save, UI.refreshGames, UI.leave }) do
+    for _, button in ipairs({ HostPage.start, HostPage.pause, HostPage.stop, HostPage.save, UI.refreshGames, UI.leave }) do
         NativeButton(button)
     end
     do
@@ -673,7 +942,7 @@ return function(Quiz)
             { selected = true, accent = true },
         }) do
             for _, active in ipairs({ true, false }) do
-                Quiz.Controls:SetButtonState(button, active, state.selected)
+                Games.Controls:SetButtonState(button, active, state.selected)
                 Same(button.Accent:IsShown(), state.accent, "only a selected panel button shows its accent")
                 Same(button:IsEnabled(), active, "selection preserves the requested native enabled state")
                 Same(button:GetFontString(), button.templateText, "selection retains the native font string")
@@ -689,11 +958,11 @@ return function(Quiz)
                 end
             end
         end
-        Quiz.Controls:SetButtonState(button, enabled, selected)
+        Games.Controls:SetButtonState(button, enabled, selected)
     end
-    Same(Quiz.Picker, nil, "custom picker implementation is no longer loaded")
-    Same(Quiz.Controls.PickerButton, nil, "custom picker control factory is removed")
-    for _, dropdown in ipairs({ UI.pack, UI.boardSwitch }) do
+    Same(Games.Picker, nil, "custom picker implementation is no longer loaded")
+    Same(Games.Controls.PickerButton, nil, "custom picker control factory is removed")
+    for _, dropdown in ipairs({ HostPage.pack, Quiz.ScoreView.scopeSwitch }) do
         Same(dropdown.kind, "DropdownButton", "selectors use Blizzard's actual intrinsic dropdown")
         Same(dropdown.template, "WowStyle1DropdownTemplate", "selectors use Blizzard's dropdown widget")
         Same(dropdown.Background.atlas, "common-dropdown-textholder", "native dropdown background art is retained")
@@ -710,24 +979,36 @@ return function(Quiz)
             dropdown:CloseMenu()
         end
     end
-    SelectDropdown(UI.pack, PACK_ID)
-    Same(UI.draft.packId, PACK_ID, "installed pack is selectable without entering its ID")
-    Same(UI.pack:GetMenuDescription().maxScrollExtent, 220, "large question-pack menus request native scrolling")
-    Same(UI.pack:GetMenuDescription():GetMaximumWidth(), 540, "long pack labels have a bounded native menu width")
-    SelectDropdown(UI.pack, PACK_ID)
-    Same(UI.duration, nil, "answer duration has no input field")
-    Same(UI.durationDown, nil, "answer duration has no decrement control")
-    Same(UI.durationUp, nil, "answer duration has no increment control")
-    Check(UI.durationInfo:GetText():find("15", 1, true), "host sees the fixed fifteen-second rule")
-    Same(UI:ReadSettings().duration, 15, "host setup preserves only the fixed duration")
-    local hostSettings = UI:ReadSettings()
+    SelectDropdown(HostPage.pack, PACK_ID)
+    Same(HostPage.draft.packId, PACK_ID, "installed pack is selectable without entering its ID")
+    Same(HostPage.pack:GetMenuDescription().maxScrollExtent, 220, "large question-pack menus request native scrolling")
+    Same(HostPage.pack:GetMenuDescription():GetMaximumWidth(), 540, "long pack labels have a bounded native menu width")
+    SelectDropdown(HostPage.pack, PACK_ID)
+    Same(HostPage.duration, nil, "answer duration has no input field")
+    Same(HostPage.durationDown, nil, "answer duration has no decrement control")
+    Same(HostPage.durationUp, nil, "answer duration has no increment control")
+    Same(HostPage.rules.answerSeconds, 15, "the selected pack retains its fifteen-second rule internally")
+    local hostSettings = HostPage:ReadSettings()
+    Same(hostSettings.packId, PACK_ID, "host setup reads only the selected Quiz pack")
     for _, key in ipairs({ "bridgeChat", "channel", "customChannel", "channelPassword", "answerMode" }) do
         Same(hostSettings[key], nil, "host setup cannot restore a removed chat setting: " .. key)
     end
-    Click(UI.start)
-    Same(Main.game.state, "open", "host starts from a button without typed setup")
-    Same(Main.game.settings.packId, PACK_ID, "pack selection drives the hosted game")
-    local round = Main.game.round
+    Click(HostPage.save)
+    Same(Quiz.Store:GetSettings().packId, PACK_ID, "footer Save persists the selected Quiz pack")
+    UI.hostTo:OpenMenu()
+    Check(UI.hostTo:IsMenuOpen(), "Host-to menu may open while setup is idle")
+    Click(HostPage.start)
+    Same(Quiz.Controller.game.state, "open", "host starts from a button without typed setup")
+    Same(Quiz.Controller.game.settings.packId, PACK_ID, "pack selection drives the hosted game")
+    Check(not UI.hostTo:IsEnabled(), "Host-to is locked for the active hosted session")
+    Check(not UI.hostTo:IsMenuOpen(), "starting a game closes the now-locked Host-to menu")
+    FooterGrid(HostPage, { HostPage.stop, HostPage.pause }, { HostPage.save, HostPage.start }, "active Quiz")
+    Click(HostPage.pause)
+    Same(Quiz.Controller.game.state, "paused", "footer Pause routes through the host controller")
+    Same(HostPage.pause:GetText(), Quiz.L.W_RESUME, "paused footer offers Resume")
+    Click(HostPage.pause)
+    Same(Quiz.Controller.game.state, "open", "footer Resume restores the active question")
+    local round = Quiz.Controller.game.round
     Same(Widget.timer:GetValue(), 15, "a newly opened hosted question starts with a full bar")
     TimerGradient(15)
     Check(Widget.timer:GetScript("OnUpdate"), "open question owns a smooth per-frame countdown")
@@ -745,7 +1026,7 @@ return function(Quiz)
     Click(Widget.choices[round.correctIndex])
     local firstAnswer = round.answers[Test.hostGUID]
     Check(firstAnswer, "answer button submits the host's selection")
-    Same(Main.game.settings.duration, 15, "button-started games use the fixed fifteen-second duration")
+    Same(Quiz.Controller.game.rules.answerSeconds, 15, "button-started games use the selected pack clock")
     Same(firstAnswer.points, 2.5, "instant correct answer earns two and a half points for a fifteen-second round")
     ScoreHidden("host's accepted answer stays private until its result")
     for index, button in ipairs(Widget.choices) do
@@ -790,7 +1071,7 @@ return function(Quiz)
     Color(hoverChoice.Text, COLORS.normal, "restored HUD does not retain a hover color")
 
     UI.frame:Show()
-    Widget:StartDrag()
+    Widget.dragHandle:GetScript("OnDragStart")(Widget.dragHandle)
     Check(Widget.dragging and Widget.frame.moving, "setup permits moving the position anchor")
     Widget.frame.mockCenterX, Widget.frame.mockCenterY = 192, 108
     UI.frame:Hide()
@@ -798,7 +1079,7 @@ return function(Quiz)
     local savedPosition = Quiz.Store:GetWidgetPosition()
     Near(savedPosition.x, Widget.layout.x, "drag writes independent normalized X position")
     Near(savedPosition.y, Widget.layout.y, "drag writes independent normalized Y position")
-    Same(Widget.layout.horizontal, "LEFT", "left screen third aligns the question left")
+    Same(Widget.layout.horizontal, "LEFT", "left outer screen band aligns the question left")
     Same(Widget.layout.vertical, "BOTTOM", "bottom half grows question content upward")
     Same(Widget.prompt.justifyH, "LEFT", "prompt text follows its screen-aware alignment")
     VisibleBounds()
@@ -832,8 +1113,8 @@ return function(Quiz)
                         )
                         Same(
                             layout.horizontal,
-                            x < 1 / 3 and "LEFT" or x > 2 / 3 and "RIGHT" or "CENTER",
-                            "screen thirds are independent from content dimensions"
+                            x < 0.5 and "LEFT" or "RIGHT",
+                            "horizontal flow follows the anchor half independently from content dimensions"
                         )
                         Same(layout.vertical, y >= 0.5 and "TOP" or "BOTTOM", "vertical flow follows anchor half")
                     end
@@ -849,7 +1130,7 @@ return function(Quiz)
     VisibleBounds()
     Same(UI.frame.Chrome.Background.atlas, "housing-basic-container", "scale refresh never replaces dialog atlas art")
     Same(UI.frame.edges, nil, "scale refresh never adds generic dialog borders")
-    for _, dropdown in ipairs({ UI.pack, UI.boardSwitch }) do
+    for _, dropdown in ipairs({ HostPage.pack, Quiz.ScoreView.scopeSwitch }) do
         Same(dropdown.Background.atlas, "common-dropdown-textholder", "scaling preserves Blizzard dropdown art")
         Same(dropdown.edges, nil, "scaling does not add a replacement dropdown border")
     end
@@ -868,8 +1149,9 @@ return function(Quiz)
     selectedChoice:GetScript("OnEnter")(selectedChoice)
     Test.now = round.deadline
     Widget.timer:GetScript("OnUpdate")(Widget.timer, 0.025)
-    Same(Main.game.state, "open", "isolated animation does not advance the host model before its ticker")
+    Same(Quiz.Controller.game.state, "open", "isolated animation does not advance the host model before its ticker")
     Same(Widget.timer:GetValue(), 0, "countdown empties at the exact deadline")
+    Check(Widget.timer.Track:IsVisible(), "countdown expiry leaves the backdrop visible")
     TimerGradient(0)
     Same(Widget.timer:GetScript("OnUpdate"), nil, "expired bar removes its own per-frame handler")
     ScoreHidden("the local timer reaching zero is not an authoritative result")
@@ -889,12 +1171,13 @@ return function(Quiz)
     Widget.choices[round.correctIndex]:GetScript("OnClick")(Widget.choices[round.correctIndex])
     Same(round.answers[Test.hostGUID], lastAnswer, "stale callbacks cannot alter an expired answer")
     Test.Advance(round.deadline - Test.now)
-    Same(Main.game.state, "results", "question closes with the HUD still visible")
+    Same(Quiz.Controller.game.state, "results", "question closes with the HUD still visible")
     Check(not Widget.choices[1].enabled, "answers disable at the deadline")
     Same(Widget.choices[round.correctIndex].tone, "correct", "correct highlight appears only after close")
     Color(Widget.choices[round.correctIndex].Text, COLORS.correct, "received result paints the correct answer green")
     Color(hoverChoice.Text, COLORS.incorrect, "received result paints the selected wrong answer red")
     Same(Widget.timer:GetValue(), 0, "results retain an empty timer")
+    Check(Widget.timer.Track:IsVisible(), "results retain the empty timer backdrop")
     TimerGradient(0)
     Same(Widget.timer:GetScript("OnUpdate"), nil, "results do not animate the countdown")
     ScoreShown(-0.9)
@@ -902,17 +1185,20 @@ return function(Quiz)
     Widget:Refresh()
     Same(Widget.scoreAnimation.playCalls, hostScorePlays, "refreshing a host result cannot replay its penalty")
     TextOnlyHUD()
-    Main:Stop()
+    Click(HostPage.stop)
+    Check(not Quiz.Controller:IsRunning(), "footer Stop ends the hosted quiz")
     Check(not Widget.frame:IsShown(), "ending the session removes the HUD outside setup")
     Same(Widget.timer:GetScript("OnUpdate"), nil, "ending a session leaves no timer update handler")
     ScoreHidden("stopping the host cancels its pending score animation")
 
     UI.frame:Show()
+    Check(UI.hostTo:IsEnabled(), "Host-to unlocks when setup returns after the hosted session stops")
     UI:SetTab("play")
     Test.guild = true
     Advertise(FIRST_HOST, "alpha-session.1", 1)
     Advertise(SECOND_HOST, "beta-session.1", 2)
     Same(#UI.gameRows, 2, "discovered games become click-to-join rows")
+    Same(UI.gameRows[1].detail:GetText(), "Test pack · Default · 1/17 players", "browser rows show occupancy")
     local allocatedFrames = #Test.frames
     for index = 1, 6 do
         Advertise(FIRST_HOST, "alpha-session.1", index % 2 + 1)
@@ -934,8 +1220,13 @@ return function(Quiz)
     Check(Session.client ~= previousClient, "joining another row replaces the previous membership")
     Same(Session.client.name, SECOND_HOST, "only the newly chosen host remains active")
     Same(Session.hostSession, nil, "participant has no simultaneous hosted session")
+    UI:SetTab("host")
+    Check(not UI.hostTo:IsEnabled(), "Host-to is locked while participating in another host's session")
+    UI.hostTo:OpenMenu()
+    Check(not UI.hostTo:IsMenuOpen(), "a locked participant cannot open Host-to")
+    UI:SetTab("play")
     local client = Session.client
-    Session:Receive(SECOND_HOST, { "W", client.request, "beta-session.1", "Default", "0.0" })
+    Session:Receive(SECOND_HOST, { "W", client.request, "beta-session.1", "0.0" })
     Widget:Refresh()
     Same(Widget.timer:GetValue(), 0, "joining a game does not start an answer countdown")
     TimerGradient(0)
@@ -1105,6 +1396,7 @@ return function(Quiz)
         Color(Widget.choices[count].Text, COLORS.correct, "hover cannot repaint a received result")
         Same(Widget.choices[count].hovered, false, "disabled result text never acquires hover state")
         Same(Widget.timer:GetValue(), 0, "received remote results empty the timer")
+        Check(Widget.timer.Track:IsVisible(), "received remote results retain the timer backdrop")
         TimerGradient(0)
         Same(Widget.timer:GetScript("OnUpdate"), nil, "received remote results stop the timer callback")
         ScoreShown(1.9)
@@ -1139,6 +1431,93 @@ return function(Quiz)
     Session.view = surfaceView
     Widget:Refresh()
     ScoreHidden("available points and answer key do not reveal an open question's result")
+    ScoreTotal(surfaceView.score, true, "active question")
+    do
+        Same(Quiz.ScoreTooltip.frame, nil, "current-game standings allocate no tooltip before score hover")
+        Same(Session.standingsVisible, false, "current-game standings are not requested before score hover")
+        local previousRows, previousRevision = Session.standingsRows, Session.standingsRevision
+        local rows = {}
+        for index = 1, 102 do
+            rows[index] = { name = string.format("Player%03d-TestRealm", index), score = 1000 - index }
+        end
+        Session.standingsRows, Session.standingsRevision = rows, 7
+        local globalState = {
+            owner = GameTooltip.owner,
+            ownerAnchor = GameTooltip.ownerAnchor,
+            ownerCalls = GameTooltip.ownerCalls,
+            showCalls = GameTooltip.showCalls,
+            hideCalls = GameTooltip.hideCalls,
+            text = GameTooltip:GetText(),
+            lines = GameTooltip.lines,
+        }
+        local sent = #Test.sent
+        Widget.scoreRegion:GetScript("OnEnter")(Widget.scoreRegion)
+        local tooltip = Quiz.ScoreTooltip.frame
+        Check(tooltip and tooltip ~= GameTooltip, "score hover creates its own private native tooltip")
+        Same(tooltip, _G.OrbitGamesQuizScoreTooltip, "private score tooltip keeps its stable global frame identity")
+        Same(tooltip.kind, "GameTooltip", "score standings use the native GameTooltip frame type")
+        Same(tooltip.template, "GameTooltipTemplate", "score standings use native tooltip rendering")
+        Same(tooltip:GetParent(), UIParent, "private score tooltip belongs directly to UIParent")
+        Same(tooltip.clamped, true, "private score tooltip remains clamped to the screen")
+        Same(tooltip.owner, Widget.scoreRegion, "private score tooltip is owned by the transparent score region")
+        Same(
+            tooltip.ownerAnchor,
+            Widget.layout.horizontal == "RIGHT" and "ANCHOR_LEFT" or "ANCHOR_RIGHT",
+            "score tooltip opens away from the widget's growth edge"
+        )
+        Same(tooltip:GetText(), Quiz.L.W_SCORE_STANDINGS, "private tooltip identifies current-game standings")
+        Same(#tooltip.lines, 100, "private tooltip caps the ranked board at one hundred rows")
+        Same(
+            tooltip.lines[1][1],
+            Quiz.L.W_SCORE_RANK_F:format(1, rows[1].name),
+            "first tooltip column includes rank and player name"
+        )
+        Same(
+            tooltip.lines[1][2],
+            Quiz.L.W_SCORE_POINTS_F:format(rows[1].score),
+            "second tooltip column includes the host-reported score"
+        )
+        Same(
+            tooltip.lines[100][1],
+            Quiz.L.W_SCORE_RANK_F:format(100, rows[100].name),
+            "tooltip truncation retains the hundredth ranked player"
+        )
+        Same(Session.standingsVisible, true, "score hover activates demand-driven standings")
+        Same(#Test.sent, sent, "score hover schedules rather than directly fabricating a wire response")
+        local ownerCalls, showCalls, lineTable = tooltip.ownerCalls, tooltip.showCalls, tooltip.lines
+        local totalText, totalAlpha = Widget.scoreValueText:GetText(), Widget.scoreValueText:GetAlpha()
+        local scorePlays, answerRevision = Widget.scoreAnimation.playCalls, client.answerRevision
+        Widget:Refresh()
+        Same(tooltip.ownerCalls, ownerCalls, "unchanged standings do not rebuild private tooltip ownership")
+        Same(tooltip.showCalls, showCalls, "unchanged standings do not show the private tooltip again")
+        Same(tooltip.lines, lineTable, "stable rows identity and revision reuse the rendered tooltip lines")
+        Same(Widget.scoreValueText:GetText(), totalText, "tooltip refresh cannot alter the permanent score")
+        Same(Widget.scoreValueText:GetAlpha(), totalAlpha, "tooltip refresh cannot dim the permanent score")
+        Same(Widget.scoreAnimation.playCalls, scorePlays, "tooltip refresh cannot replay a score delta")
+        Same(client.answerRevision, answerRevision, "score hover cannot generate an answer action")
+        local replacement = {
+            { name = "Alpha-TestRealm", score = 25.5 },
+            { name = "Beta-TestRealm", score = 10 },
+        }
+        Session.standingsRows, Session.standingsRevision = replacement, 8
+        Widget:Refresh()
+        Same(tooltip.ownerCalls, ownerCalls + 1, "a newer standings revision rebuilds the private tooltip once")
+        Same(tooltip.showCalls, showCalls + 1, "a newer standings revision is shown once")
+        Same(#tooltip.lines, 2, "new authoritative rows replace rather than append to the tooltip")
+        Same(tooltip.lines[2][1], Quiz.L.W_SCORE_RANK_F:format(2, replacement[2].name), "replacement keeps host order")
+        Widget.scoreRegion:GetScript("OnLeave")(Widget.scoreRegion)
+        Same(Session.standingsVisible, false, "leaving the score region stops demand-driven standings")
+        Same(tooltip:IsShown(), false, "leaving hides only the private score tooltip")
+        Same(Quiz.ScoreTooltip.owner, nil, "private tooltip drops its score-region owner on hide")
+        Same(GameTooltip.owner, globalState.owner, "score hover never owns Blizzard's global tooltip")
+        Same(GameTooltip.ownerAnchor, globalState.ownerAnchor, "score hover never reanchors Blizzard's tooltip")
+        Same(GameTooltip.ownerCalls, globalState.ownerCalls, "score hover never calls SetOwner on GameTooltip")
+        Same(GameTooltip.showCalls, globalState.showCalls, "score hover never shows GameTooltip")
+        Same(GameTooltip.hideCalls, globalState.hideCalls, "score hover never hides GameTooltip")
+        Same(GameTooltip:GetText(), globalState.text, "score hover never rewrites global tooltip text")
+        Same(GameTooltip.lines, globalState.lines, "private standings never touch global tooltip lines")
+        Session.standingsRows, Session.standingsRevision = previousRows, previousRevision
+    end
     for index = 1, #surfaceView.choices do
         Same(Widget.choices[index].tone, nil, "even an available answer key stays hidden before results")
         Color(
@@ -1193,6 +1572,7 @@ return function(Quiz)
     ScoreShown(-0.7)
     TextOnlyHUD()
     do
+        local scoreRegion, scoreValueText = Widget.scoreRegion, Widget.scoreValueText
         local animation, scoreText, rise, fade =
             Widget.scoreAnimation, Widget.scoreText, Widget.scoreRise, Widget.scoreFade
         local frames, fonts = #Test.frames, Test.fontStringCreations
@@ -1219,6 +1599,7 @@ return function(Quiz)
         Check(scoreText:IsShown() and animation:IsPlaying(), "score stays active until the native group completes")
         Test.AdvanceAnimations(0.02)
         ScoreHidden("native completion hides the personal score without a runtime tick")
+        ScoreTotal(surfaceView.score, true, "completed feedback")
         Same(animation.finishCalls, finishes + 1, "native completion is delivered once")
         Same(surfaceView.points, -0.7, "finishing the score animation does not alter the authoritative delta")
         Widget:Refresh()
@@ -1315,14 +1696,17 @@ return function(Quiz)
         Same(#Test.animationGroups, groups, "all result identities reuse one native animation group")
         Same(Test.animationCreations, animations, "all result identities reuse the native rise and fade")
         Same(#Test.tickers, tickers, "score feedback creates no additional timer or ticker")
-        Same(Widget.scoreText, scoreText, "personal score label identity remains stable")
+        Same(Widget.scoreRegion, scoreRegion, "permanent score hover-region identity remains stable")
+        Same(Widget.scoreValueText, scoreValueText, "permanent score label identity remains stable")
+        Same(Widget.scoreText, scoreText, "score delta label identity remains stable")
         Same(Widget.scoreAnimation, animation, "score group identity remains stable")
         Same(Widget.scoreRise, rise, "score translation identity remains stable")
         Same(Widget.scoreFade, fade, "score fade identity remains stable")
     end
-    local setupError, answerError, mainNotice = UI.actionError, Widget.actionError, Main.notice
+    local setupError, answerError, mainNotice = UI.actionError, Widget.actionError, Quiz.Controller:GetNotice()
     UI.frame:Show()
-    UI.actionError, Widget.actionError, Main.notice = nil, nil, nil
+    UI.actionError, Widget.actionError = nil, nil
+    Quiz.Controller:SetNotice(nil)
     UI:Refresh()
     Same(UI.notice:GetText(), surfaceView.notice, "session diagnostics remain accessible in setup")
     Widget.actionError = "Answer-action diagnostic"
@@ -1332,7 +1716,8 @@ return function(Quiz)
     UI:Refresh()
     Same(UI.notice:GetText(), UI.actionError, "the setup's own action error keeps precedence")
     TextOnlyHUD()
-    UI.actionError, Widget.actionError, Main.notice = setupError, answerError, mainNotice
+    UI.actionError, Widget.actionError = setupError, answerError
+    Quiz.Controller:SetNotice(mainNotice)
     UI.frame:Hide()
     do
         local id, prompt, choices, position = surfaceView.id, surfaceView.prompt, surfaceView.choices, Widget.position
@@ -1366,12 +1751,13 @@ return function(Quiz)
         end
         Widget:OnDisplayChanged()
         ScoreShown(surfaceView.points)
-        local scoreTop, scroll = Widget.scoreText:GetTop(), Widget.questionScroll
+        local scoreTop, scroll = Widget.scoreRegion:GetTop(), Widget.questionScroll
         local promptTop, range = Widget.prompt:GetTop(), scroll:GetVerticalScrollRange()
         Check(range > 0, "long-result fixture genuinely overflows its question viewport")
         scroll:SetVerticalScroll(range)
         Widget:Refresh()
-        Near(Widget.scoreText:GetTop(), scoreTop, "scrolling the question never moves the outside score region")
+        Near(Widget.scoreRegion:GetTop(), scoreTop, "scrolling the question never moves the outside score region")
+        Same(Widget.scoreValueText:GetText(), string.format("%.1f", surfaceView.score), "scrolling preserves the total")
         Check(Widget.prompt:GetTop() > promptTop, "the clipped question body actually scrolled past its old position")
         local overlapping = false
         local regions = { Widget.prompt, Widget.timer }
@@ -1380,19 +1766,22 @@ return function(Quiz)
         end
         for _, region in ipairs(regions) do
             overlapping = overlapping
-                or region:GetTop() > Widget.scoreText:GetBottom() and region:GetBottom() < Widget.scoreText:GetTop()
+                or region:GetTop() > Widget.scoreRegion:GetBottom()
+                    and region:GetBottom() < Widget.scoreRegion:GetTop()
             Check(
-                region:GetRight() < Widget.scoreText:GetLeft(),
+                region:GetRight() < Widget.scoreRegion:GetLeft(),
                 "scrolled text and timer never enter the score column"
             )
         end
         Check(overlapping, "scroll regression places question content at the score's vertical band")
         ScoreShown(surfaceView.points)
         Same(
-            Widget.scoreText:GetParent(),
+            Widget.scoreRegion:GetParent(),
             Widget.content,
-            "score is never reparented beneath the clipping scroll frame"
+            "score region is never reparented beneath the clipping scroll frame"
         )
+        Same(Widget.scoreValueText:GetParent(), Widget.scoreRegion, "permanent total remains inside the score region")
+        Same(Widget.scoreText:GetParent(), Widget.scoreRegion, "animated delta remains inside the score region")
         scroll:SetVerticalScroll(0)
         surfaceView.id, surfaceView.prompt, surfaceView.choices, Widget.position = id, prompt, choices, position
         Test.physicalWidth, Test.physicalHeight = 1920, 768
@@ -1515,6 +1904,9 @@ return function(Quiz)
     Same(Widget.prompt:GetText(), "", "a waiting HUD adds no fallback status text as a question")
     Same(Widget.timer:GetValue(), 0, "no-question view keeps an empty timer")
     Same(Widget.timer:GetScript("OnUpdate"), nil, "no-question view has no timer animation")
+    Same(Widget.scoreRegion:IsShown(), false, "no-question view hides the permanent score region")
+    Same(Widget.scoreValueText:GetText(), "", "no-question view clears the permanent score text")
+    Same(Widget.scoreRegion.mouse, false, "hidden score cannot request standings")
     for _, choice in ipairs(Widget.choices) do
         Same(choice:IsShown(), false, "no-question view hides all answer hit areas")
         Same(choice.Text:GetText(), "", "no-question view clears all prior answers")
@@ -1528,11 +1920,16 @@ return function(Quiz)
     UI.frame:Show()
     Click(UI.leave)
     Same(Session.client, nil, "explicit Leave exits the sole participant session")
+    Same(UI.current:GetText(), Games.L.W_NO_SESSION, "leaving restores the idle Games footer status")
+    Check(not UI.leave:IsEnabled(), "leaving disables the footer action until another game is joined")
+    Check(UI.gamesFooter:IsVisible(), "leaving keeps the Games footer visible")
+    Check(UI.footerDivider:IsShown(), "leaving keeps the Games footer divider visible")
     Check(Widget.frame:IsShown(), "setup still offers a position preview after leaving")
     Same(Widget.timer:GetValue(), 15, "leaving returns setup to the full preview bar")
     TimerGradient(15)
     Same(Widget.timer:GetScript("OnUpdate"), nil, "returned preview has no animation")
     ScoreHidden("leaving a participant game cancels its personal-score feedback")
+    ScoreTotal(0, false, "returned preview")
     for index = 1, 4 do
         Color(Widget.choices[index].Text, COLORS.normal, "returned preview clears all result and selection colors")
     end
@@ -1541,32 +1938,13 @@ return function(Quiz)
     Check(not Widget.frame:IsShown(), "closing setup hides only an idle preview")
 
     UI.frame:Show()
-    UI:SetTab("scores")
-    SelectDropdown(UI.boardSwitch, "personal")
-    Same(UI.boardScope, "personal", "score view exposes personal per-pack progress")
-    Check(UI.board:GetText():find("Test pack", 1, true), "personal rows display the actual received pack title")
-    Same(UI.boardHint:GetText(), Quiz.L.W_PERSONAL_HELP, "personal totals are explicitly not verified rankings")
-    SelectDropdown(UI.boardSwitch, "game")
-    Same(UI.boardScope, "game", "host-controlled session scores remain a separate view")
-    local participantRows = UI:GetBoardRows({ role = "participant", score = -1.5 })
-    Same(#participantRows, 1, "participants are not shown an invented full host leaderboard")
-    Same(
-        participantRows[1],
-        Quiz.L.W_SESSION_TOTAL_F:format(-1.5),
-        "participant session row shows the host's signed total"
-    )
-    SelectDropdown(UI.boardSwitch, "league")
-    Same(UI.boardScope, "league", "score view preserves archived current-scale league totals")
-    Same(UI.boardHint:GetText(), Quiz.L.W_LEAGUE_ARCHIVE_HELP, "old league rows are explained as read-only archives")
-    SelectDropdown(UI.boardSwitch, "legacy")
-    Same(UI.boardScope, "legacy", "old-scale scores have an explicitly separate view")
-    Check(UI.boardHint:GetText():find("separate", 1, true), "legacy view explains that its scale is separate")
+    UI:SetTab("results")
 
-    local scroll, content = Quiz.Controls:Scroll(UI.pages.scores, 160, 100)
-    scroll:SetPoint("TOPLEFT", UI.pages.scores, "TOPLEFT", 0, 0)
-    local bar = scroll.QuizScrollBar
+    local scroll, content = Games.Controls:Scroll(UI.pages.results, 160, 100)
+    scroll:SetPoint("TOPLEFT", UI.pages.results, "TOPLEFT", 0, 0)
+    local bar = scroll.GamesScrollBar
     Same(scroll.ScrollBar, bar, "scroll controls expose the single attached standalone scrollbar")
-    Same(Quiz.ScrollBar:Attach(scroll), bar, "attaching twice never creates a second scrollbar")
+    Same(Games.ScrollBar:Attach(scroll), bar, "attaching twice never creates a second scrollbar")
     Check(not bar:IsShown(), "scrollbar is hidden when the content fits")
     content:SetHeight(400)
     bar:Refresh()
@@ -1630,7 +2008,7 @@ return function(Quiz)
             end, SelectMany, "choice-" .. index)
         end
     end
-    local many = Quiz.Controls:Dropdown(UIParent, "Many choices", 160, GenerateMany)
+    local many = Games.Controls:Dropdown(UIParent, "Many choices", 160, GenerateMany)
     Same(many:GetText(), "Installed question pack 500", "native selection text finds a value in a large menu")
     Same(#many:GetMenuDescription().entries, 1000, "all registered choices reach Blizzard's menu generator")
     Same(many:GetMenuDescription().maxScrollExtent, 220, "large menus opt into bounded native scrolling")
@@ -1666,23 +2044,23 @@ return function(Quiz)
         end
     end
     many:Hide()
-    UI.boardSwitch:OpenMenu()
-    Check(UI.boardSwitch:IsMenuOpen(), "score dropdown opens before a page change")
+    Quiz.ScoreView.scopeSwitch:OpenMenu()
+    Check(Quiz.ScoreView.scopeSwitch:IsMenuOpen(), "score dropdown opens before a page change")
     UI:SetTab("host")
-    Check(not UI.boardSwitch:IsMenuOpen(), "switching pages closes the previous native menu")
-    UI.pack:OpenMenu()
-    Check(UI.pack:IsMenuOpen(), "pack dropdown opens before moving the settings dialog")
+    Check(not Quiz.ScoreView.scopeSwitch:IsMenuOpen(), "switching pages closes the previous native menu")
+    HostPage.pack:OpenMenu()
+    Check(HostPage.pack:IsMenuOpen(), "pack dropdown opens before moving the settings dialog")
     UI.frame:GetScript("OnDragStart")(UI.frame)
-    Check(not UI.pack:IsMenuOpen(), "dragging the settings dialog closes its native menu")
+    Check(not HostPage.pack:IsMenuOpen(), "dragging the settings dialog closes its native menu")
     UI.frame:GetScript("OnDragStop")(UI.frame)
-    UI.pack:OpenMenu()
+    HostPage.pack:OpenMenu()
     Main:OnEvent("UI_SCALE_CHANGED")
-    Check(not UI.pack:IsMenuOpen(), "scale changes close anchored native menus before relayout")
+    Check(not HostPage.pack:IsMenuOpen(), "scale changes close anchored native menus before relayout")
     RaisedDivider()
-    UI:SetTab("scores")
-    UI.boardSwitch:OpenMenu()
+    UI:SetTab("results")
+    Quiz.ScoreView.scopeSwitch:OpenMenu()
     Click(UI.close)
-    Check(not UI.boardSwitch:IsMenuOpen(), "closing setup also closes its native dropdown")
+    Check(not Quiz.ScoreView.scopeSwitch:IsMenuOpen(), "closing setup also closes its native dropdown")
     Same(picks, 1, "native owner lifecycle never changes a selection")
     do
         Test.now = Test.now + 0.3
@@ -1739,13 +2117,12 @@ return function(Quiz)
         }) do
             Same(UI[key], nil, "host has no control that overrides pack-owned rules: " .. key)
         end
-        Same(UI.durationInfo.kind, "FontString", "answer and reveal clocks are read-only text")
-        Same(UI.hostHelp.kind, "FontString", "rule summary is read-only text")
-        local previousSummary
+        Same(HostPage.durationInfo, nil, "variable-rule packs do not restore duration prose")
+        Same(HostPage.help, nil, "variable-rule packs do not restore rule-summary prose")
         for case, definition in ipairs(configurations) do
             local id = "interface-rule-clock-" .. case
             Check(
-                Quiz:RegisterQuestionPack({
+                Quiz:RegisterPack({
                     id = id,
                     title = "Clock and rules " .. case,
                     rules = definition,
@@ -1760,45 +2137,23 @@ return function(Quiz)
                 }),
                 "variable-clock UI pack registers"
             )
-            UI:RefreshPack()
+            HostPage.pack:GenerateMenu()
             local savedSettings = Quiz.Store:GetSettings()
-            SelectDropdown(UI.pack, id)
-            local rules, rulesKey = Quiz:GetPackRules(id)
-            Same(
-                UI.durationInfo:GetText(),
-                Quiz.L.W_RULE_DURATION_F:format(rules.answerSeconds, rules.revealSeconds),
-                "selecting a pack updates both clock labels immediately"
-            )
-            local summary = UI.hostHelp:GetText()
-            Check(summary ~= previousSummary, "pack selection rerenders its own rule summary")
-            previousSummary = summary
-            Check(
-                summary:find(Quiz.L.W_RULE_CORRECT_F:format(rules.correctPoints, rules.speedBonusPerSecond), 1, true),
-                "summary shows this pack's base and timed reward"
-            )
-            Check(
-                summary:find(Quiz.L.W_RULE_WRONG_F:format(rules.wrongPenaltyStart, rules.wrongPenaltyEnd), 1, true),
-                "summary shows this pack's penalty endpoints"
-            )
-            Check(summary:find(Quiz.L.W_RULE_LOCKED, 1, true), "summary explains the authored answer lock")
-            local streakLabel = rules.streakBonusPerCorrect > 0
-                    and Quiz.L.W_RULE_STREAK_F:format(rules.streakBonusPerCorrect, rules.streakBonusMax)
-                or Quiz.L.W_RULE_NO_STREAK
-            Check(summary:find(streakLabel, 1, true), "summary shows enabled or disabled streak bonuses")
-            Check(
-                UI.hostHelp:GetStringHeight() <= UI.hostHelp:GetHeight() + EPSILON,
-                "longest supported English rule summary fits its reserved text height"
-            )
-            Check(UI.hostHelp:GetBottom() > UI.start:GetTop(), "rule summary never overlaps the game controls")
+            SelectDropdown(HostPage.pack, id)
+            local rules, rulesKey = Quiz:GetRules(id)
+            Same(HostPage.rulesPackId, id, "pack selection refreshes the internal rules identity")
+            Same(Quiz.Rules.Encode(HostPage.rules), rulesKey, "Host retains the selected authored rules without prose")
+            Same(HostPage:GetNotice(), nil, "valid pack rules add no Host validation copy")
             for key, value in pairs(savedSettings) do
                 Same(Quiz.Store:GetSettings()[key], value, "pack selection does not persist a host override")
             end
-            for _, entry in ipairs(UI.pack:GetMenuDescription().entries) do
+            for _, entry in ipairs(HostPage.pack:GetMenuDescription().entries) do
                 Check(entry:GetData() ~= "all", "incompatible rule packs cannot be combined through the host dropdown")
             end
-            Click(UI.start)
-            local active = Main.game.round
-            Same(Main.game.rulesKey, rulesKey, "hosting takes rules from the selected pack")
+            Click(HostPage.start)
+            local active = Quiz.Controller.game.round
+            FooterGrid(HostPage, { HostPage.stop, HostPage.pause }, { HostPage.save, HostPage.start }, "variable Quiz")
+            Same(Quiz.Controller.game.rulesKey, rulesKey, "hosting takes rules from the selected pack")
             Same(
                 active.deadline - active.startedAt,
                 rules.answerSeconds,
@@ -1808,8 +2163,8 @@ return function(Quiz)
             TimerGradient(rules.answerSeconds, rules.answerSeconds)
             UI.frame:Hide()
             Click(Widget.choices[active.correctIndex])
-            Check(Main:GetHostView().locked, "first accepted choice immediately locks a no-change pack")
-            local originalAnswer = active.answers[Quiz.Identity.guid]
+            Check(Quiz.Controller:GetHostView().locked, "first accepted choice immediately locks a no-change pack")
+            local originalAnswer = active.answers[Games.Identity.guid]
             for _, choice in ipairs(Widget.choices) do
                 Same(choice:IsEnabled(), false, "answer lock disables all choices before expiry")
             end
@@ -1817,7 +2172,7 @@ return function(Quiz)
             local deadline, colorCount = active.deadline, Test.colorCreations
             Widget.choices[active.correctIndex % #active.choices + 1]:GetScript("OnClick")()
             Same(
-                active.answers[Quiz.Identity.guid],
+                active.answers[Games.Identity.guid],
                 originalAnswer,
                 "even a stale disabled callback cannot replace a locked answer"
             )
@@ -1833,76 +2188,12 @@ return function(Quiz)
             Same(Test.colorCreations, colorCount, "variable clocks reuse their gradient colors while locked")
             Same(Widget.timer:GetScript("OnUpdate"), nil, "variable timer removes its animation at timeout")
             ScoreHidden("a variable timer expiring is not an authoritative result")
-            Check(Main:Stop(), "variable-clock UI fixture stops without committing an unfinished round")
+            Click(HostPage.stop)
+            Check(not Quiz.Controller:IsRunning(), "variable-clock footer stops without committing an unfinished round")
             UI.frame:Show()
             UI:SetTab("host")
+            FooterGrid(HostPage, { HostPage.save, HostPage.start }, { HostPage.stop, HostPage.pause }, "reset Quiz")
         end
-        UI.frame:Hide()
-    end
-    do
-        local variants = {
-            defaultRules,
-            Quiz.Rules.Normalize({ answerSeconds = 5, correctPoints = 100, speedBonusPerSecond = 0 }),
-            Quiz.Rules.Normalize({ version = 2 }),
-        }
-        for index, rules in ipairs(variants) do
-            Check(
-                Quiz.PersonalScores:RecordResult({
-                    host = "Comparison-TestRealm",
-                    session = "ui-score-rules.1",
-                    roundId = index,
-                    packId = "ui-rule-score-rows",
-                    packTitle = "Comparable score rows",
-                    packVersion = 1,
-                    scoringVersion = Quiz.Scoring.VERSION,
-                    rulesKey = Quiz.Rules.Encode(rules),
-                    duration = rules.answerSeconds,
-                    choiceCount = 4,
-                    correctIndex = 1,
-                    selected = 1,
-                    elapsed = 1,
-                    streak = 1,
-                    streakBonus = 0,
-                    points = Quiz.Scoring.Calculate(true, 1, rules.answerSeconds, rules, 1),
-                }),
-                "UI comparison fixture records a rule-specific personal result"
-            )
-        end
-        UI.frame:Show()
-        UI:SetTab("scores")
-        SelectDropdown(UI.boardSwitch, "personal")
-        local lines = {}
-        for _, line in ipairs(UI:GetPersonalScoreLines()) do
-            if line:find("Comparable score rows", 1, true) then
-                lines[#lines + 1] = line
-                Check(
-                    not line:find("104.8", 1, true),
-                    "UI never presents the mixed-rule aggregate as a comparable score"
-                )
-            end
-        end
-        Same(#lines, 3, "the same pack displays separate scores for each distinct rule key")
-        Check(
-            lines[1]:find(Quiz.L.W_RULE_VARIANT_F:format(1, 1), 1, true),
-            "equal rule revisions distinguish their first variant"
-        )
-        Check(
-            lines[2]:find(Quiz.L.W_RULE_VARIANT_F:format(1, 2), 1, true),
-            "equal rule revisions distinguish their second variant"
-        )
-        Check(
-            lines[3]:find(Quiz.L.W_RULE_VERSION_F:format(2), 1, true),
-            "a different authored revision has its own rule label"
-        )
-        Check(
-            UI.board:GetText():find("Comparable score rows", 1, true),
-            "actual score panel renders the rule-specific rows"
-        )
-        Same(
-            UI.boardHint:GetText(),
-            Quiz.L.W_PERSONAL_HELP,
-            "score panel continues to explain separate rules and unverified progress"
-        )
         UI.frame:Hide()
     end
     SetupShadowsUnchanged()

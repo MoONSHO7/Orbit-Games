@@ -22,9 +22,8 @@ jobs:
     permissions:
       contents: write
     concurrency:
-      group: orbit-quiz-release-tag
+      group: orbit-games-release-tag
       cancel-in-progress: false
-      queue: max
     steps:
       - name: Checkout tested commit
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

@@ -1,4 +1,4 @@
-"""Exercise isolated clients through native discovery and the real fragmented quiz transport."""
+"""Exercise isolated clients through native discovery and fragmented addon transport."""
 
 import math
 
@@ -6,9 +6,12 @@ from lupa.lua51 import lua_type
 
 from run import runtime
 
-QUIZ_PREFIX = "ORBITQUIZ8"
-DISCOVERY_PREFIX = "ORBITQUIZDISC8"
-LOBBY_NAME = "OrbitQuizLobby"
+QUIZ_PREFIX = "ORBITGAMES1"
+DISCOVERY_PREFIX = "ORBITGAMESDISC2"
+LOBBY_NAME = "OrbitGamesLobby"
+GAME_TYPE_ID = "quiz"
+LEGACY_QUIZ_PREFIX = "ORBITQUIZ8"
+LEGACY_DISCOVERY_PREFIX = "ORBITQUIZDISC8"
 REVEAL_SECONDS = 3
 BOUNDARY_EPSILON = 0.001
 
@@ -35,7 +38,8 @@ def saved_copy(value):
 
 class Node:
     def __init__(self, name, saved=None):
-        self.lua, self.quiz = runtime(host_name=name)
+        self.lua, self.games_root = runtime(host_name=name, saved=saved)
+        self.quiz = self.games_root.Quiz
         self.test = self.lua.globals().Test
         self.test.hostGUID = "Player-0-" + (name if name.isascii() else name.encode("utf-8").hex())
         self.name = f"{name}-TestRealm"
@@ -50,19 +54,21 @@ class Node:
         end""")
         self.receive = self.lua.eval("""function(prefix, hex, channel, sender, target, localID, channelName)
             local text = hex:gsub('%x%x', function(c) return string.char(tonumber(c, 16)) end)
-            OrbitQuiz.Main:OnEvent('CHAT_MSG_ADDON', prefix, text, channel, sender, target, 0, localID, channelName)
+            OrbitGames.Main:OnEvent('CHAT_MSG_ADDON', prefix, text, channel, sender, target, 0, localID, channelName)
         end""")
-        if saved is not None:
-            self.lua.globals().OrbitQuizDB = self.lua.table_from(saved, recursive=True)
-            self.event("ADDON_LOADED", "Orbit-Quiz")
-            self.event("PLAYER_LOGIN")
 
     def call(self, owner, method, *args):
-        module = self.quiz[owner]
+        generic = {"Main", "UI", "Comms", "Discovery", "Identity", "Media", "Minimap"}
+        module = self.games_root[owner] if owner in generic else self.quiz[owner]
+        if owner == "Main" and module[method] is None:
+            module = self.quiz.Controller
+        if owner == "Comms" and method == "Send":
+            args = (args[0], GAME_TYPE_ID, *args[1:])
         return module[method](module, *args)
 
     def view(self):
-        return self.call("Session", "GetView")
+        session = self.call("Main", "GetSession")
+        return session.GetView(session)
 
     def event(self, event, *args):
         self.call("Main", "OnEvent", event, *args)
@@ -72,10 +78,10 @@ class Node:
 
     def answer_on(self, host):
         peer = host.quiz.Session.peers[self.name.lower()]
-        return host.quiz.Main.game.round.answers[peer.playerKey] if peer else None
+        return host.quiz.Controller.game.round.answers[peer.playerKey] if peer else None
 
     def standings(self):
-        return self.quiz.Main.game.GetStandings(self.quiz.Main.game)
+        return self.quiz.Controller.game.GetStandings(self.quiz.Controller.game)
 
     def personal(self, pack_id):
         return self.call("PersonalScores", "GetPack", pack_id)
@@ -129,16 +135,21 @@ class World:
                     assert version == b"1", "the quiz prefix changes without changing the transport envelope"
                     key = source.name, message_id
                     if part == b"1":
-                        self.packet_codes[key] = fragment.split(b":", 2)[2][:1].decode("ascii")
-                        if self.packet_codes[key] in ("Q", "R"):
-                            self.packet_round_ids[key] = decode_fields(fragment, limit=3)[2]
+                        header = decode_fields(fragment, limit=3)
+                        registry = source.games_root.GameTypes
+                        descriptor = registry.Get(registry, header[0])
+                        assert descriptor is not None, "the transport envelope must identify a registered game type"
+                        assert int(header[1]) == descriptor.protocolVersion, "the envelope must match its mode protocol"
+                        self.packet_codes[key] = header[2]
+                        if header[0] == GAME_TYPE_ID and self.packet_codes[key] in ("Q", "R"):
+                            self.packet_round_ids[key] = decode_fields(fragment, limit=5)[4]
                     code = self.packet_codes.get(key)
                     round_id = self.packet_round_ids.get(key)
                     if total == b"1":
-                        fields = decode_fields(fragment)
+                        fields = decode_fields(fragment)[2:]
                 elif prefix == DISCOVERY_PREFIX:
                     version, code, *_ = wire.decode("utf-8").split("|")
-                    assert version == "8", "discovery advertises the streak-toast protocol version"
+                    assert version == "2", "discovery advertises the generic discovery protocol version"
                     message_id, part, total = str(source.cursor).encode("ascii"), b"1", b"1"
                     fields = wire.decode("utf-8").split("|")
                 else:
@@ -182,8 +193,9 @@ def run_suite():
 
     def register_pack(node, pack_id, title, version=1, matching_lore=False):
         register = node.lua.eval("""function(id, title, version, matchingLore)
-            local rules = matchingLore and OrbitQuiz:GetPackRules('warcraft-lore') or nil
-            return OrbitQuiz:RegisterQuestionPack({id=id, title=title, version=version, rules=rules, questions={
+            local Quiz = OrbitGames.Quiz
+            local rules = matchingLore and Quiz:GetRules('warcraft-lore') or nil
+            return Quiz:RegisterPack({id=id, title=title, version=version, rules=rules, questions={
                 {id='shared-question', prompt='Which answer is correct?',
                     choices={'Right', 'Wrong one', 'Wrong two', 'Wrong three'}, correctIndex=1}
             }})
@@ -198,7 +210,7 @@ def run_suite():
                     choices={'Wrong first', 'Correct', 'Wrong third', 'Wrong fourth'}, correctIndex=2,
                     explanation='Private answer explanation.', source='https://example.org/private-rules-answer'}
             end
-            return OrbitQuiz:RegisterQuestionPack({id=id, title=id, rules=rules, questions=questions})
+            return OrbitGames.Quiz:RegisterPack({id=id, title=id, rules=rules, questions=questions})
         end""")
         ok(register(pack_id, node.lua.table_from(rules), count), "host-only authored rules pack registers")
 
@@ -208,7 +220,7 @@ def run_suite():
         ok(host.call("Main", "Start", setup), "host starts a personal-progress fixture")
         ok(player.call("Session", "JoinHost", host.name), "participant chooses the fixture host")
         world.until(lambda: player.view().state == "open" and player.view().hostName == host.name)
-        round_ = host.quiz.Main.game.round
+        round_ = host.quiz.Controller.game.round
         equal(player.view().score, 0, "a fresh host game never imports personal lifetime totals")
         choice = round_.correctIndex if correct else round_.correctIndex % 4 + 1
         ok(player.call("Session", "SubmitAnswer", choice), "participant submits a real timed selection")
@@ -229,25 +241,44 @@ def run_suite():
             if 1 in parts and len(parts) == parts[1]["total"]:
                 ordered = [parts[index] for index in range(1, len(parts) + 1)]
                 encoded = b"".join(packet["wire"].split(b"|", 4)[4] for packet in ordered)
-                results.append((decode_fields(encoded), ordered))
+                fields = decode_fields(encoded)
+                assert fields[0] == GAME_TYPE_ID, "captured Quiz results retain the game-type envelope"
+                assert fields[1] == "2", "captured Quiz results retain the mode protocol envelope"
+                results.append((fields[2:], ordered))
         return results
 
     world = World("Quizhost", "Player", "Friend")
     host, player, friend = world.nodes
+    reject_legacy = player.lua.eval("""function(gameplayPrefix, discoveryPrefix, sender)
+        local gameplay = OrbitGames.Comms:Receive(gameplayPrefix, '1|legacy-1|1|1|2:4:quiz1:J', 'WHISPER', sender)
+        local discovery = OrbitGames.Discovery:Receive(
+            discoveryPrefix, '1|Q', 'WHISPER', sender, Test.hostName .. '-' .. Test.realm, 0, 0, ''
+        )
+        return gameplay, discovery
+    end""")
+    legacy_gameplay, legacy_discovery = reject_legacy(LEGACY_QUIZ_PREFIX, LEGACY_DISCOVERY_PREFIX, host.name)
+    equal(legacy_gameplay, False, "legacy Orbit-Quiz gameplay prefix is rejected")
+    equal(legacy_discovery, False, "legacy Orbit-Quiz discovery prefix is rejected")
+    equal(len(player.games()), 0, "legacy prefixes cannot create generic discovery state")
     settings = host.call("Store", "GetSettings")
     settings.league = "Guild {Quiz}"
     settings.duration = 20
     ok(host.call("Main", "Start", settings), "start autonomous host")
-    equal(host.quiz.Main.game.settings.duration, 15, "legacy settings cannot change hosted duration")
-    equal(host.quiz.Main.game.round.deadline - host.quiz.Main.game.round.startedAt, 15,
+    equal(host.quiz.Controller.game.rules.answerSeconds, 15, "legacy settings cannot change authored answer time")
+    equal(host.quiz.Controller.game.round.deadline - host.quiz.Controller.game.round.startedAt, 15,
           "every hosted question opens for exactly fifteen seconds")
     world.until(lambda: len(player.games()) == len(friend.games()) == 1)
     equal(player.games()[0].hostName, host.name, "native discovery exposes the host without typing")
-    equal(player.games()[0].league, settings.league, "discovery preserves selected league")
-    ok(player.call("Session", "JoinHost", player.games()[0].hostName), "join using discovered row")
-    ok(friend.call("Session", "JoinHost", friend.games()[0].hostName), "another participant joins discovered row")
+    equal(player.games()[0].gameTypeId, GAME_TYPE_ID, "discovery carries an immutable registered game type")
+    equal(player.games()[0].protocolVersion, 2, "discovery carries the Quiz mode protocol version")
+    equal(player.games()[0].activityId, GAME_TYPE_ID, "discovery carries an immutable activity type")
+    equal(player.games()[0].activityVersion, 1, "discovery carries the Quiz activity version")
+    equal(player.games()[0].maxPlayers, 17, "discovery carries the Quiz capacity")
+    equal(player.games()[0].joinable, True, "discovery carries join availability")
+    ok(player.call("Main", "Join", player.games()[0]), "generic runtime joins using the discovered game row")
+    ok(friend.call("Main", "Join", friend.games()[0]), "another participant joins through generic dispatch")
     world.until(lambda: player.view().state == friend.view().state == "open")
-    question = host.quiz.Main.game.round
+    question = host.quiz.Controller.game.round
     equal(player.view().duration, 15, "native question payload advertises the fixed fifteen-second window")
     equal(player.view().id, question.id, "joined mid-round id")
     for index in range(1, 5):
@@ -283,15 +314,33 @@ def run_suite():
         equal(node.view().fastestName, player.name, "the correct final selection wins over faster wrong guesses")
         equal(node.view().fastestElapsed, latest_elapsed, "all clients receive the winner's final host-receipt time")
     equal(len(host.standings()), 3, "host session ranks all three authoritative player totals")
+    for participant in (player, friend):
+        participant.call("Session", "SetStandingsVisible", True)
+    world.until(lambda: all(node.call("Session", "GetStandings")[0] is not None for node in (player, friend)))
+    host_projection, host_revision = host.call("Session", "GetStandings")
+    expected_projection = [(row.name, row.score) for row in host_projection.values()]
+    for participant in (player, friend):
+        projection, revision = participant.call("Session", "GetStandings")
+        equal(revision, host_revision, "hovered clients receive the current host standings revision")
+        equal(
+            [(row.name, row.score) for row in projection.values()],
+            expected_projection,
+            "hovered clients receive the same absolute ranked scores as the host",
+        )
+        participant.call("Session", "SetStandingsVisible", False)
+    world.advance(0.5)
+    equal(len(host.standings()), 3, "standings requests never add a model player")
+    equal(sum(row.answers for row in host.standings().values()), 3, "standings retries never record an answer twice")
+    equal(player.personal(question.packId).answers, 1, "standings projection never replays personal credit")
     equal(len(host.call("Store", "GetStandings", "Guild {Quiz}", "PUBLIC")), 0,
           "new host results leave archived leagues untouched")
     equal(len(player.call("Store", "GetStandings", "Guild {Quiz}", "PUBLIC")), 0,
           "participant never writes host league totals locally")
     equal(player.personal(question.packId).score, 1.9, "participant saves its own pack score")
     equal(player.personal(question.packId).answers, 1, "participant saves one finalized answer")
-    equal(friend.personal(question.packId).score, friend.view().points, "each account saves only its own penalty")
-    equal(host.personal(question.packId).score, host.view().points, "hosting credits only the host's own answer")
-    next_at = host.quiz.Main.nextAutoAt
+    equal(friend.personal(question.packId).score, 0, "each account floors its own penalty at zero")
+    equal(host.personal(question.packId).score, 0, "hosting floors the host's own penalty at zero")
+    next_at = host.quiz.Controller.nextAutoAt
     check(0 <= next_at - REVEAL_SECONDS - question.deadline < 0.100001,
           "the host schedules three seconds of reveal from its deadline tick")
     world.step(next_at - host.test.now - BOUNDARY_EPSILON)
@@ -301,11 +350,11 @@ def run_suite():
         equal(node.view().correctIndex, question.correctIndex, "the correct answer remains revealed throughout the break")
         equal(node.view().locked, True, "revealed choices stay locked on every client")
     world.step(next_at - host.test.now)
-    check(host.quiz.Main.game.round.id != question.id, "the host prepares the next question at exactly three seconds")
+    check(host.quiz.Controller.game.round.id != question.id, "the host prepares the next question at exactly three seconds")
     equal(host.test.now, next_at, "automatic preparation begins at the scheduled reveal boundary")
-    equal(host.quiz.Main.nextAutoAt, None, "starting the next question consumes the prior result deadline")
+    equal(host.quiz.Controller.nextAutoAt, None, "starting the next question consumes the prior result deadline")
     world.until(lambda: player.view().id != question.id and player.view().state == "open")
-    equal(host.quiz.Main.game.round.deadline - host.quiz.Main.game.round.startedAt, 15,
+    equal(host.quiz.Controller.game.round.deadline - host.quiz.Controller.game.round.startedAt, 15,
           "peer readiness after the reveal preserves the full fifteen-second answer window")
     equal(player.view().correctIndex, None, "the next remote question clears the prior revealed answer")
     equal(player.view().selected, None, "new question clears previous selection")
@@ -316,6 +365,110 @@ def run_suite():
     world.until(lambda: player.view().state == friend.view().state == "stopped")
     equal(host.quiz.Session.hostSession, None, "stopping clears hosting while discovery remains available")
 
+    world = World("Quizhost", "Player")
+    host, player = world.nodes
+    ok(host.call("Main", "Start"), "zero-floor recovery host starts")
+    ok(player.call("Session", "JoinHost", host.name), "zero-floor recovery participant joins")
+    world.until(lambda: player.view().state == "open")
+    first = host.quiz.Controller.game.round
+    first_wrong = first.correctIndex % 4 + 1
+    ok(host.call("Session", "SubmitAnswer", first_wrong), "host records an initial wrong answer at zero")
+    ok(player.call("Session", "SubmitAnswer", first_wrong), "participant records an initial wrong answer at zero")
+    world.until(lambda: player.view().confirmedSelected == first_wrong and not player.view().pending)
+    world.until(lambda: player.view().correctIndex is not None, seconds=20)
+    equal(host.view().score, 0, "host current score floors the first wrong result at zero")
+    equal(player.view().score, 0, "participant current score floors the first wrong result at zero")
+
+    player.call("Session", "SetStandingsVisible", True)
+    world.until(lambda: player.call("Session", "GetStandings")[0] is not None)
+    cached_host_rows, cached_host_revision = host.call("Session", "GetStandings")
+    cached_player_rows, cached_player_revision = player.call("Session", "GetStandings")
+    equal(cached_host_revision, first.id, "host cache identifies the wrong-answer result revision")
+    equal(cached_player_revision, first.id, "participant cache receives the wrong-answer result revision")
+    equal(
+        {row.name: row.score for row in cached_host_rows.values()},
+        {host.name: 0, player.name: 0},
+        "host cache contains both zero-floored players before recovery",
+    )
+
+    world.until(lambda: player.view().state == "open" and player.view().id != first.id)
+    second = host.quiz.Controller.game.round
+    world.step(second.deadline - host.test.now - 0.3)
+    ok(host.call("Session", "SubmitAnswer", second.correctIndex), "host answers correctly near the next deadline")
+    ok(player.call("Session", "SubmitAnswer", second.correctIndex), "participant answers correctly near the next deadline")
+    world.until(lambda: player.view().confirmedSelected == second.correctIndex and not player.view().pending)
+    equal(host.quiz.Controller.game.round.answers[host.test.hostGUID].points, 1, "near-deadline host answer earns one point")
+    equal(player.answer_on(host).points, 1, "near-deadline participant answer earns one point")
+    world.until(lambda: player.view().correctIndex is not None, seconds=5)
+    equal(host.view().points, 1, "host result exposes the signed one-point delta")
+    equal(player.view().points, 1, "participant result exposes the signed one-point delta")
+    equal(host.view().score, 1, "host current score gains one point after recovering from its zero floor")
+    equal(player.view().score, 1, "participant current score gains one point after recovering from its zero floor")
+
+    current_host_rows, current_host_revision = host.call("Session", "GetStandings")
+    equal(current_host_revision, second.id, "host standings advance to the correct-answer revision")
+    equal(
+        {row.name: row.score for row in current_host_rows.values()},
+        {host.name: 1, player.name: 1},
+        "host standings give both recovered players their authoritative point",
+    )
+    world.until(lambda: player.call("Session", "GetStandings")[1] == second.id)
+    current_player_rows, current_player_revision = player.call("Session", "GetStandings")
+    equal(current_player_revision, second.id, "hovered participant standings advance to the correct-answer revision")
+    equal(
+        {row.name: row.score for row in current_player_rows.values()},
+        {host.name: 1, player.name: 1},
+        "hovered participant standings match both authoritative recovered totals",
+    )
+
+    host_raw_equal = host.lua.eval("function(left, right) return rawequal(left, right) end")
+    player_raw_equal = player.lua.eval("function(left, right) return rawequal(left, right) end")
+    repeated_host_rows, repeated_host_revision = host.call("Session", "GetStandings")
+    repeated_player_rows, repeated_player_revision = player.call("Session", "GetStandings")
+    check(host_raw_equal(current_host_rows, repeated_host_rows), "unchanged host standings retrieval reuses its cached rows")
+    check(
+        player_raw_equal(current_player_rows, repeated_player_rows),
+        "unchanged participant retrieval reuses its accepted rows",
+    )
+    equal(repeated_host_revision, second.id, "repeated host retrieval retains the current revision")
+    equal(repeated_player_revision, second.id, "repeated participant retrieval retains the current revision")
+
+    second_result_fields = next(
+        fields
+        for fields, _ in captured_results(world.packets, host, player)
+        if fields[2] == str(second.id)
+    )
+    second_standings_fields = next(
+        packet["fields"]
+        for packet in reversed(world.packets)
+        if packet["source"] is host
+        and packet["target"] == player.name
+        and packet["code"] == "V"
+        and packet["fields"] is not None
+        and packet["fields"][3] == str(second.id)
+    )
+    personal_answers = player.personal(second.packId).answers
+    ok(
+        host.call("Comms", "Send", player.name, host.lua.table_from(second_result_fields)),
+        "host replays the same authoritative result in a fresh transport message",
+    )
+    world.advance(0.5)
+    equal(player.view().score, 1, "replayed result cannot add the recovered point twice")
+    equal(player.personal(second.packId).answers, personal_answers, "replayed result cannot persist a second receipt")
+    ok(
+        host.call("Comms", "Send", player.name, host.lua.table_from(second_standings_fields)),
+        "host replays the same standings revision in a fresh transport message",
+    )
+    world.advance(0.5)
+    replayed_player_rows, replayed_player_revision = player.call("Session", "GetStandings")
+    check(player_raw_equal(current_player_rows, replayed_player_rows), "replayed standings are a pointer-stable no-op")
+    equal(replayed_player_revision, second.id, "replayed standings cannot advance or duplicate the revision")
+    equal(player.view().score, 1, "replayed standings cannot change the participant's current score")
+    equal(host.view().score, 1, "participant result and standings replays cannot change the host's current score")
+    equal(sum(row.answers for row in host.standings().values()), 4, "two players and two rounds remain recorded exactly once")
+    player.call("Session", "SetStandingsVisible", False)
+    host.call("Main", "Stop")
+
     for automatic in (False, True):
         world = World("Quizhost", "Player")
         host, player = world.nodes
@@ -324,22 +477,22 @@ def run_suite():
         ok(host.call("Main", "Start", settings), "reveal-pause host starts automatically")
         ok(player.call("Session", "JoinHost", host.name), "reveal-pause participant joins")
         world.until(lambda: player.view().state == "open")
-        round_ = host.quiz.Main.game.round
+        round_ = host.quiz.Controller.game.round
         ok(player.call("Session", "SubmitAnswer", round_.correctIndex), "reveal-pause player answers")
         world.until(lambda: player.view().correctIndex is not None)
         saved_score = player.view().score
-        equal(host.quiz.Main.game.completed, 1, "reveal-pause starts after one finalized question")
+        equal(host.quiz.Controller.game.completed, 1, "reveal-pause starts after one finalized question")
         if automatic:
             host.event("ADDON_RESTRICTION_STATE_CHANGED", 5, 1)
             host.test.restricted = True
         else:
             ok(host.call("Main", "Pause", None, False), "manual host pause interrupts the reveal")
             world.until(lambda: player.view().state == "paused")
-        equal(host.quiz.Main.nextAutoAt, None, "pausing results cancels their three-second auto-advance")
+        equal(host.quiz.Controller.nextAutoAt, None, "pausing results cancels their three-second auto-advance")
         world.advance(REVEAL_SECONDS + 1)
-        equal(host.quiz.Main.game.state, "paused", "the canceled reveal deadline cannot resume the host")
-        equal(host.quiz.Main.game.round.id, round_.id, "no next question is prepared while results are paused")
-        equal(host.quiz.Main.game.completed, 1, "a paused reveal cannot finalize another question")
+        equal(host.quiz.Controller.game.state, "paused", "the canceled reveal deadline cannot resume the host")
+        equal(host.quiz.Controller.game.round.id, round_.id, "no next question is prepared while results are paused")
+        equal(host.quiz.Controller.game.completed, 1, "a paused reveal cannot finalize another question")
         standings = host.standings()
         equal(standings[1].score, saved_score, "paused reveal retains its already-earned score")
         equal(standings[1].answers, 1, "paused reveal never commits the same answer twice")
@@ -349,8 +502,8 @@ def run_suite():
         else:
             ok(host.call("Main", "Resume"), "manual reveal pause resumes explicitly")
         world.until(lambda: player.view().state == "open" and player.view().id != round_.id)
-        equal(player.view().id, host.quiz.Main.game.round.id, "reveal recovery synchronizes the new question")
-        equal(host.quiz.Main.game.round.deadline - host.quiz.Main.game.round.startedAt, 15,
+        equal(player.view().id, host.quiz.Controller.game.round.id, "reveal recovery synchronizes the new question")
+        equal(host.quiz.Controller.game.round.deadline - host.quiz.Controller.game.round.startedAt, 15,
               "reveal recovery gives the next question a full fifteen-second answer window")
         equal(player.view().score, saved_score, "reveal recovery retains the player's earned score")
         equal(player.view().correctIndex, None, "reveal recovery clears the old correct answer")
@@ -363,7 +516,7 @@ def run_suite():
     ok(host.call("Main", "Start"), "answer-order host")
     ok(player.call("Session", "JoinHost", host.name), "answer-order participant")
     world.until(lambda: player.view().state == "open")
-    round_ = host.quiz.Main.game.round
+    round_ = host.quiz.Controller.game.round
     correct, wrong = round_.correctIndex, round_.correctIndex % 4 + 1
     delayed_answers, delayed_acks = [], []
 
@@ -409,7 +562,7 @@ def run_suite():
     ok(host.call("Main", "Start"), "rapid-change host")
     ok(player.call("Session", "JoinHost", host.name), "rapid-change participant")
     world.until(lambda: player.view().state == "open")
-    correct = host.quiz.Main.game.round.correctIndex
+    correct = host.quiz.Controller.game.round.correctIndex
     wrong = correct % 4 + 1
     ok(player.call("Session", "SubmitAnswer", correct), "first correct selection")
     world.until(lambda: player.view().confirmedSelected == correct and not player.view().pending)
@@ -450,7 +603,7 @@ def run_suite():
     ok(host.call("Main", "Start", settings), "same-host rejoin host")
     ok(player.call("Session", "JoinHost", host.name), "first membership request")
     world.until(lambda: player.view().state == "open")
-    correct = host.quiz.Main.game.round.correctIndex
+    correct = host.quiz.Controller.game.round.correctIndex
     wrong = correct % 4 + 1
     old_request = player.quiz.Session.client.request
     delayed_membership = []
@@ -505,7 +658,7 @@ def run_suite():
         ok(host.call("Main", "Start", settings), "fixed-round recovery host ignores an old sixty-second setting")
         ok(player.call("Session", "JoinHost", host.name), "fixed-round recovery participant")
         world.until(lambda: player.view().state == "open")
-        round_ = host.quiz.Main.game.round
+        round_ = host.quiz.Controller.game.round
         round_id, correct = round_.id, round_.correctIndex
         wrong = correct % 4 + 1
         equal(round_.deadline - round_.startedAt, 15, "recovery fixture uses a real fifteen-second question")
@@ -550,22 +703,22 @@ def run_suite():
         equal(len(player.test.addonSent), sent_at_restriction, "restricted player emits no retry or discovery traffic")
         if outage_seconds > 35:
             equal(host.quiz.Session.peers[player.name.lower()], None, "host actually expired the thirty-five-second peer lease")
-            check(host.quiz.Main.game.round.id > round_id, "fifteen-second questions continue across a prolonged outage")
+            check(host.quiz.Controller.game.round.id > round_id, "fifteen-second questions continue across a prolonged outage")
             equal(round_.deadline - round_.startedAt, 15, "question closed during outage with its fixed duration")
-            equal(host.standings()[1].score, before_pause_points, "host retains the accepted penalty during an outage")
+            equal(host.standings()[1].score, 0, "host retains the accepted penalty behind the zero floor during an outage")
             check(-1 <= round_.answers[old_player_key].points <= -0.5,
                   "disconnection does not erase the finalized negative penalty")
             equal(round_.answers[old_player_key].elapsed, before_pause_elapsed, "outage did not retime the accepted answer")
         else:
             check(host.quiz.Session.peers[player.name.lower()] is not None, "brief restriction does not expire membership")
-            equal(host.quiz.Main.game.round.id, round_id, "brief recovery exercises the same still-open question")
+            equal(host.quiz.Controller.game.round.id, round_id, "brief recovery exercises the same still-open question")
         player.test.restricted = False
         player.event("ADDON_RESTRICTION_STATE_CHANGED", 5, 0)
         fresh_request = player.quiz.Session.client.request
         check(fresh_request != old_request, "restriction recovery rotates the connection nonce once")
         world.until(lambda: player.view().state == "open" and host.quiz.Session.peers[player.name.lower()] is not None,
                     seconds=15)
-        recovered_round = host.quiz.Main.game.round
+        recovered_round = host.quiz.Controller.game.round
         equal(player.view().id, recovered_round.id, "reconnection synchronizes the currently authoritative question")
         equal(player.quiz.Session.client.request, fresh_request, "recovery W retries do not churn connection nonces")
         check(dropped_welcome["done"], "recovery welcome loss is actually exercised")
@@ -575,10 +728,10 @@ def run_suite():
             check(recovered_round.id > round_id, "recovery after lease expiry joins a later fixed-window question")
             equal(player.view().selected, None, "new question does not inherit an old optimistic selection")
             equal(player.answer_on(host), None, "recovery never applies a previous question's answer to a new question")
-            equal(player.view().score, before_pause_points, "rejoin welcome and snapshot restore the negative session total")
+            equal(player.view().score, 0, "rejoin welcome and snapshot restore the zero-floored session total")
             world.until(lambda: player.personal(round_.packId) is not None)
-            equal(player.personal(round_.packId).score, before_pause_points,
-                  "rejoining after peer expiry recovers the retained personal penalty receipt")
+            equal(player.personal(round_.packId).score, 0,
+                  "rejoining after peer expiry restores the personal score floor")
         else:
             equal(recovered_round.id, round_id, "brief recovery remains within the original fifteen-second round")
             world.until(lambda: player.view().confirmedSelected == wrong)
@@ -609,12 +762,15 @@ def run_suite():
         equal(player.view().points, final_points, "fixed-window result uses the latest post-recovery answer")
         equal(player.view().correctCount, 1, "recovered membership counts as one correct player in its current round")
         equal(player.view().totalAnswers, 1, "old connection does not contribute a second answer")
-        expected_total = math.floor((score_before_recovery_answer + final_points) * 10 + 0.5) / 10
-        equal(host.standings()[1].score, expected_total,
-              "recovered session score counts once without losing any earlier wrong-answer penalty")
-        equal(player.view().score, expected_total, "signed cumulative score reaches the recovered participant")
-        equal(player.personal(round_.packId).score, expected_total,
-              "personal progress counts the recovered results once, including any earlier penalty")
+        expected_current_total = max(0, math.floor((score_before_recovery_answer + final_points) * 10 + 0.5) / 10)
+        personal_prior_balance = before_pause_points if outage_seconds > 35 else score_before_recovery_answer
+        expected_personal_total = max(0, math.floor((personal_prior_balance + final_points) * 10 + 0.5) / 10)
+        equal(host.standings()[1].score, expected_current_total,
+              "recovered session score adds once from the prior zero-floored total")
+        equal(player.view().score, expected_current_total,
+              "zero-floored cumulative score reaches the recovered participant")
+        equal(player.personal(round_.packId).score, expected_personal_total,
+              "personal progress counts the recovered results once, including its order-independent penalty")
         host.call("Main", "Stop")
 
     world = World("Quizhost", "Player")
@@ -623,7 +779,8 @@ def run_suite():
     ok(host.call("Main", "Start", settings), "same-name replacement host starts first game")
     world.until(lambda: len(player.games()) == 1)
     first_listing = player.games()[0]
-    ok(player.call("Session", "JoinHost", first_listing.hostName, first_listing.session), "join first advertised session")
+    ok(player.call("Session", "JoinHost", first_listing.hostName, first_listing.sessionId),
+       "join first advertised session")
     world.until(lambda: player.view().state == "open")
     first_session = player.quiz.Session.client.session
     first_request = player.quiz.Session.client.request
@@ -640,16 +797,16 @@ def run_suite():
     world.until(lambda: len(lost_stops) > 0)
     equal(player.quiz.Session.client.session, first_session, "lost stop leaves participant aware only of prior session")
     ok(host.call("Main", "Start", settings), "same character starts a distinctly advertised game")
-    world.until(lambda: len(player.games()) == 1 and player.games()[0].session != first_session)
+    world.until(lambda: len(player.games()) == 1 and player.games()[0].sessionId != first_session)
     replacement = player.games()[0]
-    ok(player.call("Session", "JoinHost", replacement.hostName, replacement.session),
+    ok(player.call("Session", "JoinHost", replacement.hostName, replacement.sessionId),
        "clicking a newer session from the same host replaces stale membership")
     check(player.quiz.Session.client.request != first_request, "same-host different-session selection rotates membership")
-    world.until(lambda: player.view().state == "open" and player.quiz.Session.client.session == replacement.session)
-    equal(player.view().id, host.quiz.Main.game.round.id, "same-host replacement receives its new current question")
+    world.until(lambda: player.view().state == "open" and player.quiz.Session.client.session == replacement.sessionId)
+    equal(player.view().id, host.quiz.Controller.game.round.id, "same-host replacement receives its new current question")
     world.deliver(lost_stops[0])
     world.advance(0.2)
-    equal(player.quiz.Session.client.session, replacement.session, "late old X cannot terminate same-host replacement")
+    equal(player.quiz.Session.client.session, replacement.sessionId, "late old X cannot terminate same-host replacement")
     equal(player.view().state, "open", "new advertised session remains playable after old stop arrives")
     host.call("Main", "Stop")
 
@@ -675,8 +832,8 @@ def run_suite():
     ok(player.call("Session", "JoinHost", alpha_row.hostName), "hosting player joins another discovered game")
     world.until(lambda: player.view().state == "open" and friend.view().state == "stopped")
     equal(player.quiz.Session.hostSession, None, "joining while hosting ends the local hosted session")
-    equal(player.quiz.Main.game.state, "stopped", "previous hosted game stops its round progression")
-    equal(player.quiz.Main.notice, None, "switching from hosting clears its stale stopped-game notice")
+    equal(player.quiz.Controller.game.state, "stopped", "previous hosted game stops its round progression")
+    equal(player.quiz.Controller.notice, None, "switching from hosting clears its stale stopped-game notice")
     equal(player.quiz.Session.client.name, alpha.name, "hosting-to-participant transition keeps one membership")
     equal(friend.quiz.Session.client, None, "former hosted participants are told their game ended")
     equal(beta.quiz.Session.peers[player.name.lower()], None, "earlier unrelated host never regains membership")
@@ -690,7 +847,7 @@ def run_suite():
             string.rep('選', 33)..'C', string.rep('選', 33)..'D',
             string.rep('選', 33)..'E', string.rep('選', 33)..'F' }
         math.random = function(maximum) return maximum end
-        assert(OrbitQuiz:RegisterQuestionPack({id='wire-test', title='Network pack', version=1, locale='enUS',
+        assert(OrbitGames.Quiz:RegisterPack({id='wire-test', title='Network pack', version=1, locale='enUS',
             questions={
                 {id='one', prompt=string.rep('題', 50)..'1', choices=choices, correctIndex=6,
                     explanation=string.rep('答', 50), difficulty='very_hard', era=string.rep('史', 21),
@@ -725,17 +882,17 @@ def run_suite():
     ok(player.call("Session", "JoinHost", host.name), "join without installed host pack")
     world.until(lambda: player.view().state == "open")
     check(dropped["question"], "a mid-UTF8 question fragment was actually lost")
-    equal(player.view().prompt, host.quiz.Main.game.round.prompt, "snapshot recovers whole UTF8 question")
+    equal(player.view().prompt, host.quiz.Controller.game.round.prompt, "snapshot recovers whole UTF8 question")
     equal(len(player.view().choices), 6, "fragment retry recovers all six UTF8 choices")
     equal(player.view().difficulty, "very_hard", "question fragmentation preserves difficulty")
     equal(player.view().era, "史" * 21, "question fragmentation preserves the maximum multibyte era")
     equal(player.view().source, None, "host editorial reference never reaches the participant")
     check(all(b"editorial-answer-spoiler" not in packet["wire"] for packet in world.packets),
           "editorial source is never encoded into addon traffic")
-    equal(len(player.quiz.GetQuestionPacks(player.quiz)), 1, "participant did not need host companion pack")
-    correct = host.quiz.Main.game.round.correctIndex
+    equal(len(player.quiz.GetPacks(player.quiz)), 1, "participant did not need host companion pack")
+    correct = host.quiz.Controller.game.round.correctIndex
     equal(correct, 6, "the sixth authored choice remains correct in the deterministic fixture")
-    ok(player.call("Session", "SubmitAnswer", host.quiz.Main.game.round.choices[correct]),
+    ok(player.call("Session", "SubmitAnswer", host.quiz.Controller.game.round.choices[correct]),
        "UTF8 typed answer before acknowledgement loss")
     world.until(lambda: player.answer_on(host) is not None)
     accepted_elapsed, accepted_points = player.answer_on(host).elapsed, player.answer_on(host).points
@@ -745,7 +902,7 @@ def run_suite():
     equal(player.answer_on(host).points, accepted_points, "same-action retry retains its original timing bonus")
     check(len([packet for packet in world.packets if packet["prefix"] == QUIZ_PREFIX and packet["code"] == "A"]) >= 2,
           "lost acknowledgement actually causes an answer retransmission")
-    equal(host.lua.eval("(function() local n=0 for _ in pairs(OrbitQuiz.Main.game.round.answers) do n=n+1 end return n end)()"), 1,
+    equal(host.lua.eval("(function() local n=0 for _ in pairs(OrbitGames.Quiz.Controller.game.round.answers) do n=n+1 end return n end)()"), 1,
           "answer retransmission records exactly one answer")
     world.until(lambda: player.view().correctIndex is not None, seconds=25)
     check(dropped["result"] is not None, "a result message was actually lost")
@@ -758,15 +915,15 @@ def run_suite():
     world.drop = lambda packet: False
     seen = {1: set()}
     previous = None
-    while host.quiz.Main.game.cycle < 4:
-        world.until(lambda: host.quiz.Main.game.state == "open" and host.quiz.Main.game.round.id != previous, seconds=40)
-        round_ = host.quiz.Main.game.round
+    while host.quiz.Controller.game.cycle < 4:
+        world.until(lambda: host.quiz.Controller.game.state == "open" and host.quiz.Controller.game.round.id != previous, seconds=40)
+        round_ = host.quiz.Controller.game.round
         previous = round_.id
         cycle = round_.cycle
         bucket = seen.setdefault(cycle, set())
         check(round_.key not in bucket, "each question appears once per cycle")
         bucket.add(round_.key)
-        world.until(lambda: host.quiz.Main.game.state == "results", seconds=25)
+        world.until(lambda: host.quiz.Controller.game.state == "results", seconds=25)
     equal(len(seen[2]), 2, "complete second shuffled cycle")
     equal(len(seen[3]), 2, "complete third shuffled cycle")
     host.call("Main", "Stop")
@@ -783,7 +940,7 @@ def run_suite():
                 correctIndex=count, difficulty='hard', era='Warcraft III',
                 source='https://example.org/private-editorial-source'}
         end
-        assert(OrbitQuiz:RegisterQuestionPack({id='choice-cycle', title='Choice count cycle', questions=questions}))
+        assert(OrbitGames.Quiz:RegisterPack({id='choice-cycle', title='Choice count cycle', questions=questions}))
     """)
     settings = host.call("Store", "GetSettings")
     settings.packId, settings.league = "choice-cycle", "Choice count regression"
@@ -792,7 +949,7 @@ def run_suite():
     world.until(lambda: player.view().state == "open")
     for count in (6, 5, 4):
         world.until(lambda: player.view().state == "open" and len(player.view().choices) == count, seconds=35)
-        round_ = host.quiz.Main.game.round
+        round_ = host.quiz.Controller.game.round
         equal(round_.correctIndex, count, "mixed-choice deck preserves deterministic high correct indices")
         equal(player.view().id, round_.id, "mixed-choice client and host remain on the same round")
         ok(player.call("Session", "SubmitAnswer", count), "last valid choice reaches the host")
@@ -821,7 +978,7 @@ def run_suite():
         world.until(lambda: player.view().correctIndex is not None, seconds=15)
         equal(player.view().correctIndex, count, "mixed-choice result reveals the correct high index")
         equal(player.view().points, original_points, "mixed-choice result retains authoritative score")
-    saved = player.lua.globals().OrbitQuizDB
+    saved = player.lua.globals().OrbitGamesDB.modes.quiz
     loaded = player.call("Store", "Initialize", saved)
     history = loaded.personalScores.recent
     equal(len(history), 3, "all mixed-choice rounds persist exactly once")
@@ -838,16 +995,16 @@ def run_suite():
     world.until(lambda: player.view().state == "open")
     prior = player.view().id
     host.event("ADDON_RESTRICTION_STATE_CHANGED", 5, 1)
-    equal(host.quiz.Main.game.state, "paused", "activating payload pauses before API updates")
+    equal(host.quiz.Controller.game.state, "paused", "activating payload pauses before API updates")
     host.test.restricted = True
     sent_before = len(host.test.addonSent)
     world.advance(40)
     equal(len(host.test.addonSent), sent_before, "restricted host sends no addon traffic")
-    equal(host.quiz.Main.game.completed, 0, "restricted unfinished question never scores")
+    equal(host.quiz.Controller.game.completed, 0, "restricted unfinished question never scores")
     host.test.restricted = False
     host.event("ADDON_RESTRICTION_STATE_CHANGED", 5, 0)
     world.until(lambda: player.view().state == "open" and player.view().id != prior, seconds=20)
-    equal(player.view().id, host.quiz.Main.game.round.id, "host resumes connected widget after prolonged pause")
+    equal(player.view().id, host.quiz.Controller.game.round.id, "host resumes connected widget after prolonged pause")
 
     player.event("ADDON_RESTRICTION_STATE_CHANGED", 5, 1)
     player.test.restricted = True
@@ -858,14 +1015,14 @@ def run_suite():
     player.test.restricted = False
     player.event("ADDON_RESTRICTION_STATE_CHANGED", 5, 0)
     world.until(lambda: player.view().state == "open" and host.quiz.Session.peers[player.name.lower()] is not None, seconds=25)
-    equal(player.view().id, host.quiz.Main.game.round.id, "participant rejoins after its lease expires")
+    equal(player.view().id, host.quiz.Controller.game.round.id, "participant rejoins after its lease expires")
 
     ok(host.call("Main", "Pause", None, False), "manual host pause")
     world.until(lambda: player.view().state == "paused")
     host.event("ADDON_RESTRICTION_STATE_CHANGED", 5, 1)
     host.event("ADDON_RESTRICTION_STATE_CHANGED", 5, 0)
     world.advance(2)
-    equal(host.quiz.Main.game.state, "paused", "manual pause is not automatically resumed")
+    equal(host.quiz.Controller.game.state, "paused", "manual pause is not automatically resumed")
     host.call("Main", "Resume")
     world.until(lambda: player.view().state == "open")
     ok(player.call("Main", "Start"), "participant switches explicitly to hosting")
@@ -883,13 +1040,13 @@ def run_suite():
     settings.channelPassword = "RetiredPassword"
     settings.answerMode = "PUBLIC"
     ok(host.call("Main", "Start", settings), "old enabled chat setup cannot prevent automatic hosting")
-    equal(host.quiz.Main.game.state, "open", "obsolete chat setup cannot create a manual preparation state")
+    equal(host.quiz.Controller.game.state, "open", "obsolete chat setup cannot create a manual preparation state")
     for node in world.nodes:
         equal(node.quiz.Chat, None, "visible chat transport is not loaded on either client")
-        equal(node.quiz.Main.PublishChat, None, "neither client exposes a manual publish flow")
+        equal(node.quiz.Controller.PublishChat, None, "neither client exposes a manual publish flow")
     ok(player.call("Session", "JoinHost", host.name), "participant joins automatic widget-only play")
     world.until(lambda: player.view().state == "open")
-    round_ = host.quiz.Main.game.round
+    round_ = host.quiz.Controller.game.round
     equal(round_.deadline - round_.startedAt, 15, "obsolete chat setup retains the automatic fifteen-second clock")
     wrong = round_.correctIndex % 4 + 1
     for text in (chr(64 + wrong), f"!{int(round_.id)} {chr(64 + wrong)}", round_.choices[wrong]):
@@ -915,7 +1072,7 @@ def run_suite():
     equal(player.view().totalAnswers, 1, "ignored chat cannot duplicate player identity")
     prior_id = round_.id
     world.until(lambda: player.view().id != prior_id and player.view().state == "open")
-    equal(player.view().id, host.quiz.Main.game.round.id, "the next shared question starts without publication")
+    equal(player.view().id, host.quiz.Controller.game.round.id, "the next shared question starts without publication")
     for node in world.nodes:
         equal(len(node.test.sent), 0, "old chat setup and native replies never trigger visible output")
     host.call("Main", "Stop")
@@ -934,12 +1091,12 @@ def run_suite():
         world.until(lambda: len(player.games()) == 1)
         row = player.games()[0]
         equal(row.hostName, host.name, f"{route} host identity comes from native sender")
-        equal(row.session, host.quiz.Session.hostSession, f"{route} listing identifies current host session")
+        equal(row.sessionId, host.quiz.Session.hostSession, f"{route} listing identifies current host session")
         check(any(packet["prefix"] == DISCOVERY_PREFIX and packet["channel"] == route
                   and packet["source"] is host and packet["target"] == player.name for packet in world.packets),
               f"{route} is actually used for automatic discovery")
         if route == "CHANNEL":
-            equal(player.quiz.Discovery.lobbyConfirmed, True, "lobby self-echo confirms native channel availability")
+            equal(player.games_root.Discovery.lobbyConfirmed, True, "lobby self-echo confirms native channel availability")
             check(host.test.lobbyId != player.test.lobbyId, "channel fixture uses recipient-specific local IDs")
         ok(player.call("Session", "JoinHost", row.hostName), f"{route} row joins without typed host name")
         world.until(lambda: player.view().state == "open")
@@ -957,7 +1114,7 @@ def run_suite():
     host, player = world.nodes
     host.test.lobbyJoined, player.test.lobbyJoined = True, True
     host.test.lobbyId, player.test.lobbyId = 17, 29
-    advertisement = f"8|A|123.456|{player.name}|Native identity|open|1".encode("utf-8").hex()
+    advertisement = f"2|A|123.456|quiz|2|quiz|1|{player.name}|Native identity|open|1|17|1".encode("utf-8").hex()
     player.receive(DISCOVERY_PREFIX, advertisement, "CHANNEL", host.name, None, host.test.lobbyId, LOBBY_NAME)
     equal(len(player.games()), 0, "sender's channel number cannot substitute for recipient-local channel identity")
     player.receive(DISCOVERY_PREFIX, advertisement, "CHANNEL", host.name, None, player.test.lobbyId, "Trade")
@@ -965,7 +1122,7 @@ def run_suite():
     player.receive(DISCOVERY_PREFIX, advertisement, "CHANNEL", host.name, None, player.test.lobbyId, LOBBY_NAME)
     equal(len(player.games()), 1, "correct native lobby metadata permits discovery")
     equal(player.games()[0].hostName, host.name, "payload text resembling a player name cannot forge host identity")
-    equal(player.games()[0].packName, player.name, "display text remains metadata, never a routing address")
+    equal(player.games()[0].title, player.name, "display text remains metadata, never a routing address")
     equal(player.view().role, "idle", "discovering another host never auto-joins or changes the active session")
     equal(player.quiz.Session.client, None, "a discovery packet alone never creates game membership")
 
@@ -999,7 +1156,7 @@ def run_suite():
           "join packets contain only the action and membership nonce, never claimed totals")
     stats.score = original_score
     cached_stats.score = original_score
-    second = beta.quiz.Main.game.round
+    second = beta.quiz.Controller.game.round
     equal(second.id, first.id, "different hosts may reuse numeric round IDs without sharing receipt identity")
     wrong = second.correctIndex % 4 + 1
     ok(player.call("Session", "SubmitAnswer", wrong), "a wrong answer at the second host is timed normally")
@@ -1013,7 +1170,7 @@ def run_suite():
     equal(player.personal("shared-lore").title, "Shared lore revised", "newer pack metadata updates its display title")
     equal(player.personal("shared-lore").versions[1], 1, "old pack revision statistics are retained")
     equal(player.personal("shared-lore").versions[2], 1, "new revision continues under the same pack ID")
-    equal(beta.standings()[1].score, second_points, "second host board contains only its own game's result")
+    equal(beta.standings()[1].score, 0, "second host board floors its wrong-only game at zero")
     equal(alpha.standings()[1].score, first_points, "the original host's stopped session board is unchanged")
     equal(player.quiz.Store.db.personalScores.recent[1].session, first_session,
           "receipts preserve the first host/session provenance")
@@ -1036,7 +1193,7 @@ def run_suite():
     ok(player.call("Session", "JoinHost", beta.name), "participant joins combined-pack play")
     for expected_pack in ("separate-lore", "mixed-lore"):
         world.until(lambda: player.view().state == "open" and player.view().packId == expected_pack, seconds=30)
-        round_ = beta.quiz.Main.game.round
+        round_ = beta.quiz.Controller.game.round
         equal(round_.packId, expected_pack, "combined deck retains the question's actual pack provenance")
         equal(player.view().packTitle, round_.packTitle, "combined Q carries its actual pack's title")
         equal(player.view().packVersion, round_.packVersion, "combined Q carries its actual pack's version")
@@ -1051,10 +1208,10 @@ def run_suite():
             equal(player.personal(expected_pack).score, points, "a second combined-deck pack gets separate progress")
     equal(player.personal("all"), None, "All packs never becomes a lifetime scoring identity")
     equal(player.personal("shared-lore").score, shared_score, "unplayed packs are unchanged by the combined deck")
-    equal(len(player.quiz.GetQuestionPacks(player.quiz)), 1, "remote progress does not require the companion packs installed")
+    equal(len(player.quiz.GetPacks(player.quiz)), 1, "remote progress does not require the companion packs installed")
     beta.call("Main", "Stop")
     world.until(lambda: player.view().state == "stopped")
-    saved = saved_copy(player.lua.globals().OrbitQuizDB)
+    saved = saved_copy(player.lua.globals().OrbitGamesDB)
     alt = Node("Personalalt", saved=saved)
     equal(alt.personal("shared-lore").score, shared_score, "another character on the same saved account retains pack totals")
     equal(alt.personal("shared-lore").answers, 2, "account-wide reload retains both hosts' answers")
@@ -1074,7 +1231,7 @@ def run_suite():
     ok(host.call("Main", "Start", setup), "receipt retry host starts")
     ok(player.call("Session", "JoinHost", host.name), "receipt retry participant joins")
     world.until(lambda: player.view().state == "open")
-    first = host.quiz.Main.game.round
+    first = host.quiz.Controller.game.round
     ok(player.call("Session", "SubmitAnswer", first.correctIndex), "first retry fixture answers correctly")
     world.until(lambda: player.view().confirmedSelected == first.correctIndex)
     first_points = player.answer_on(host).points
@@ -1091,13 +1248,13 @@ def run_suite():
     world.until(lambda: player.view().state == "open" and player.view().id != first.id, seconds=25)
     check(held_results, "the first finalized receipt was genuinely dropped across question advancement")
     equal(player.personal("receipt-lore"), None, "a missing receipt cannot fabricate personal points from a heartbeat")
-    second = host.quiz.Main.game.round
+    second = host.quiz.Controller.game.round
     wrong = second.correctIndex % 4 + 1
     ok(player.call("Session", "SubmitAnswer", wrong), "second question is answered while the old result is missing")
     world.until(lambda: player.view().confirmedSelected == wrong)
     second_points = player.answer_on(host).points
     world.until(lambda: player.view().correctIndex is not None)
-    equal(player.personal("receipt-lore").score, second_points, "the later result can arrive before the earlier result")
+    equal(player.personal("receipt-lore").score, 0, "the later penalty is floored while the earlier result is missing")
     current_id, current_points, current_score = player.view().id, player.view().points, player.view().score
     complete_held = captured_results(held_results, host, player)
     check(complete_held, "the dropped rule-aware receipt retains all of its fragments")
@@ -1129,7 +1286,7 @@ def run_suite():
     ok(host.call("Main", "Start", setup), "host starts the final-receipt shutdown fixture")
     ok(player.call("Session", "JoinHost", host.name), "shutdown fixture participant joins")
     world.until(lambda: player.view().state == "open")
-    final_round = host.quiz.Main.game.round
+    final_round = host.quiz.Controller.game.round
     ok(player.call("Session", "SubmitAnswer", final_round.correctIndex), "shutdown fixture has a confirmed answer")
     world.until(lambda: player.view().confirmedSelected == final_round.correctIndex)
     final_points = player.answer_on(host).points
@@ -1151,14 +1308,14 @@ def run_suite():
     ok(host.call("Main", "Start", setup), "capacity-error fixture host starts")
     ok(player.call("Session", "JoinHost", host.name), "capacity-error fixture participant joins")
     world.until(lambda: player.view().state == "open")
-    closed = host.quiz.Main.game.round
+    closed = host.quiz.Controller.game.round
     ok(player.call("Session", "SubmitAnswer", closed.correctIndex), "remote answer is accepted before local host storage fills")
     world.until(lambda: player.view().confirmedSelected == closed.correctIndex)
     earned = player.answer_on(host).points
     save_result = host.quiz.PersonalScores.RecordResult
     host.lua.execute("""
         Test.personalSaveAttempts = 0
-        OrbitQuiz.PersonalScores.RecordResult = function()
+        OrbitGames.Quiz.PersonalScores.RecordResult = function()
             Test.personalSaveAttempts = Test.personalSaveAttempts + 1
             return false, 'personal_history_full'
         end
@@ -1172,20 +1329,20 @@ def run_suite():
         return False
 
     world.drop = drop_capacity_receipt
-    world.until(lambda: host.quiz.Main.game.state == "paused", seconds=20)
+    world.until(lambda: host.quiz.Controller.game.state == "paused", seconds=20)
     equal(host.test.personalSaveAttempts, 1, "full local storage attempts to save the finalized round only once")
-    equal(host.quiz.Main.notice, host.quiz.L.errors.personal_history_full, "capacity failure has a localized actionable notice")
-    equal(host.quiz.Main.autoPaused, False, "capacity failure pauses manually instead of entering automatic restriction recovery")
-    equal(host.quiz.Main.nextAutoAt, None, "capacity pause cancels automatic question advancement")
-    equal(host.quiz.Main.game.completed, 1, "the round remains finalized despite the host's local-save failure")
+    equal(host.quiz.Controller.notice, host.quiz.L.errors.personal_history_full, "capacity failure has a localized actionable notice")
+    equal(host.quiz.Controller.autoPaused, False, "capacity failure pauses manually instead of entering automatic restriction recovery")
+    equal(host.quiz.Controller.nextAutoAt, None, "capacity pause cancels automatic question advancement")
+    equal(host.quiz.Controller.game.completed, 1, "the round remains finalized despite the host's local-save failure")
     equal(host.quiz.Session.resultCount, 1, "the remote completed receipt is retained despite local-save failure")
-    check(host.quiz.Main.ticker is not None and host.quiz.Main.ticker.active,
+    check(host.games_root.Main.ticker is not None and host.games_root.Main.ticker.active,
           "capacity pause keeps the communication/retry ticker alive")
     equal(host.personal("full-lore"), None, "failed local storage cannot invent saved host progress")
     world.until(lambda: player.view().state == "paused")
     world.advance(7)
     equal(host.test.personalSaveAttempts, 1, "paused ticks never retry and flood the failed local save")
-    equal(host.quiz.Main.game.completed, 1, "paused ticks do not finalize the same question again")
+    equal(host.quiz.Controller.game.completed, 1, "paused ticks do not finalize the same question again")
     equal(len(host.test.errors), 0, "storage capacity handling never floods the WoW error handler")
     check(len(capacity_receipts) >= 2, "remote receipt retransmission continues while the host is paused")
     world.drop = lambda packet: False
@@ -1210,7 +1367,7 @@ def run_suite():
     for node in (player, friend):
         ok(node.call("Session", "JoinHost", host.name), "winner fixture joins a real host session")
     world.until(lambda: player.view().state == friend.view().state == "open")
-    round_ = host.quiz.Main.game.round
+    round_ = host.quiz.Controller.game.round
     correct, wrong = round_.correctIndex, round_.correctIndex % 4 + 1
     ok(player.call("Session", "SubmitAnswer", correct), "player makes the earliest provisional correct answer")
     world.until(lambda: player.view().confirmedSelected == correct)
@@ -1259,10 +1416,10 @@ def run_suite():
     equal(player.quiz.Widget.winnerAnimation.playCalls, popup_plays, "duplicate receipt cannot restart the active winner popup")
     equal(player.quiz.Widget.winnerAnimation.stopCalls, popup_stops,
           "duplicate receipt cannot abruptly stop the active winner popup")
-    reloaded = Node(player.test.hostName, saved=saved_copy(player.lua.globals().OrbitQuizDB))
+    reloaded = Node(player.test.hostName, saved=saved_copy(player.lua.globals().OrbitGamesDB))
     reloaded.test.now = player.test.now
-    reloaded.quiz.Comms.epoch = None
-    ok(reloaded.call("Comms", "Initialize", reloaded.quiz.Comms.onMessage, reloaded.quiz.Comms.onError),
+    reloaded.games_root.Comms.epoch = None
+    ok(reloaded.call("Comms", "Initialize", reloaded.games_root.Comms.onMessage, reloaded.games_root.Comms.onError),
        "reloaded fixture initializes its transport against the current native clock")
     world.nodes[world.nodes.index(player)] = reloaded
     world.by_name[reloaded.name.lower()] = reloaded
@@ -1284,7 +1441,7 @@ def run_suite():
     for node in (early, remaining):
         ok(node.call("Session", "JoinHost", host.name), "accepted-leaver fixture joins")
     world.until(lambda: early.view().state == remaining.view().state == "open")
-    round_ = host.quiz.Main.game.round
+    round_ = host.quiz.Controller.game.round
     ok(early.call("Session", "SubmitAnswer", round_.correctIndex), "early player submits an accepted correct answer")
     world.until(lambda: early.view().confirmedSelected == round_.correctIndex)
     accepted_elapsed = early.answer_on(host).elapsed
@@ -1297,7 +1454,7 @@ def run_suite():
     for node in (host, remaining):
         equal(node.view().fastestName, early.name, "accepted leaver remains eligible while another round-ready player stays")
         equal(node.view().fastestElapsed, accepted_elapsed, "leaving cannot erase or retime the accepted winner")
-    equal(host.quiz.Main.game.lastResult.correctCount, 2, "winner eligibility and host scoring retain both accepted answers")
+    equal(host.quiz.Controller.game.lastResult.correctCount, 2, "winner eligibility and host scoring retain both accepted answers")
     host.call("Main", "Stop")
 
     for eligibility in ("solo", "all_left", "no_correct"):
@@ -1310,7 +1467,7 @@ def run_suite():
         if eligibility != "solo":
             ok(player.call("Session", "JoinHost", host.name), "winner suppression fixture has a remote member")
             world.until(lambda: player.view().state == "open")
-        round_ = host.quiz.Main.game.round
+        round_ = host.quiz.Controller.game.round
         if eligibility == "all_left":
             ok(player.call("Session", "SubmitAnswer", round_.correctIndex), "departing member has an accepted correct answer")
             world.until(lambda: player.view().confirmedSelected == round_.correctIndex)
@@ -1331,7 +1488,7 @@ def run_suite():
             equal(node.view().fastestElapsed, None, eligibility + " cannot expose a stray winner time")
             node.call("Widget", "Refresh")
             equal(node.quiz.Widget.winnerAnimation.playCalls, 0, eligibility + " suppresses the popup entirely")
-        equal(host.quiz.Main.game.lastResult.correctCount, 0 if eligibility == "no_correct" else 1,
+        equal(host.quiz.Controller.game.lastResult.correctCount, 0 if eligibility == "no_correct" else 1,
               "announcement suppression never changes the independently scored outcome")
         host.call("Main", "Stop")
 
@@ -1343,7 +1500,7 @@ def run_suite():
     ok(host.call("Main", "Start", setup), "late winner receipt fixture starts")
     ok(player.call("Session", "JoinHost", host.name), "late winner receipt participant joins")
     world.until(lambda: player.view().state == "open")
-    first = host.quiz.Main.game.round
+    first = host.quiz.Controller.game.round
     ok(player.call("Session", "SubmitAnswer", first.correctIndex), "delayed winner has an accepted correct answer")
     world.until(lambda: player.view().confirmedSelected == first.correctIndex)
     held = []
@@ -1380,7 +1537,7 @@ def run_suite():
     ok(host.call("Main", "Start", setup), "result-before-question winner fixture starts")
     ok(ready.call("Session", "JoinHost", host.name), "winner order fixture has a real round-ready participant")
     world.until(lambda: ready.view().state == "open")
-    round_ = host.quiz.Main.game.round
+    round_ = host.quiz.Controller.game.round
     ok(ready.call("Session", "SubmitAnswer", round_.correctIndex), "ready player supplies the real winner")
     world.until(lambda: ready.view().correctIndex is not None, seconds=20)
     held_questions = []
@@ -1424,7 +1581,7 @@ def run_suite():
     ok(host.call("Main", "Start", setup), "the host chooses a pack without changing its authored rules")
     ok(player.call("Session", "JoinHost", host.name), "participant joins without installing the author's pack")
     world.until(lambda: player.view().state == "open")
-    first = host.quiz.Main.game.round
+    first = host.quiz.Controller.game.round
     equal(player.view().duration, 8, "variable answer time travels from the pack to the participant")
     equal(first.deadline - first.startedAt, 8, "legacy host settings cannot override the author's clock")
     equal(player.view().rulesKey, first.rulesKey, "both clients agree on the canonical game rules")
@@ -1432,7 +1589,7 @@ def run_suite():
     equal(player.view().correctIndex, None, "public rules metadata does not leak the private answer index")
     equal(player.view().explanation, None, "private explanation remains absent before results")
     equal(player.view().source, None, "private answer source remains absent before results")
-    equal(len(player.quiz.GetQuestionPacks(player.quiz)), 1, "remote rules do not require the host's pack to be installed")
+    equal(len(player.quiz.GetPacks(player.quiz)), 1, "remote rules do not require the host's pack to be installed")
     equal(first.prompt, "Authored rule question 1", "authored question order remains stable across the wire")
     equal(first.correctIndex, 2, "unshuffled choice order remains stable across the wire")
     ok(player.call("Session", "SubmitAnswer", 1), "editable rule pack accepts an initial wrong choice")
@@ -1446,10 +1603,10 @@ def run_suite():
     equal(player.view().points, expected_base, "revised answers score using the author's rate and final host receipt time")
     equal(player.view().streak, 1, "first correct result starts the remote streak at one")
     equal(player.view().streakBonus, 0, "first correct result has no extra streak award")
-    check(0 <= host.quiz.Main.nextAutoAt - host.quiz.Main.game.round.deadline - 2 < 0.100001,
+    check(0 <= host.quiz.Controller.nextAutoAt - host.quiz.Controller.game.round.deadline - 2 < 0.100001,
           "the host schedules the authored two-second reveal from its deadline tick")
     world.until(lambda: player.view().state == "open" and player.view().id != first.id)
-    second = host.quiz.Main.game.round
+    second = host.quiz.Controller.game.round
     equal(second.prompt, "Authored rule question 2", "automatic authored progression uses the next ordered question")
     ok(player.call("Session", "SubmitAnswer", 2), "second consecutive remote answer is correct")
     world.until(lambda: player.view().confirmedSelected == 2 and not player.view().pending)
@@ -1466,7 +1623,7 @@ def run_suite():
 
     world.drop = hold_streak_receipt
     world.until(lambda: player.view().state == "open" and player.view().id != second.id, seconds=20)
-    current = host.quiz.Main.game.round
+    current = host.quiz.Controller.game.round
     equal(current.prompt, "Authored rule question 3", "a missing old receipt does not halt automatic question delivery")
     equal(player.personal(rules_id).answers, 1, "a withheld streak result cannot be inferred from session totals")
     held_complete = captured_results(held_streak, host, player)
@@ -1492,7 +1649,7 @@ def run_suite():
     equal(player.view().streak, 0, "the participant receives the reset streak for an unanswered question")
     equal(player.view().streakBonus, 0, "an unanswered authored round earns no stale streak reward")
     world.until(lambda: player.view().state == "open" and player.view().id != current.id)
-    repeated = host.quiz.Main.game.round
+    repeated = host.quiz.Controller.game.round
     equal(repeated.prompt, "Authored rule question 1", "ordered repeated decks return to the authored first question")
     ok(player.call("Session", "SubmitAnswer", 2), "correct answer after a missed round is accepted")
     world.until(lambda: player.view().correctIndex is not None)
@@ -1519,7 +1676,7 @@ def run_suite():
         previous_id = None
         for number in range(1, expected_count + 1):
             world.until(lambda: player.view().state == "open" and player.view().id != previous_id)
-            round_ = host.quiz.Main.game.round
+            round_ = host.quiz.Controller.game.round
             equal(round_.prompt, "Authored rule question " + str((number - 1) % 2 + 1),
                   "finite remote rounds obey ordered single-pass or repeated-deck rules")
             equal(round_.deadline - round_.startedAt, 5, "finite rounds receive their full authored answer window")
@@ -1539,19 +1696,20 @@ def run_suite():
             world.until(lambda: player.view().correctIndex is not None)
             equal(player.personal(rules_id).answers, number, "finite results persist once per completed question")
             previous_id = round_.id
-        equal(host.quiz.Main.game.completed, expected_count, "finite multiplayer game closes exactly the authored round count")
-        equal(host.quiz.Main.game.state, "finished", "finite model finishes before the final presentation is dismissed")
+        equal(host.quiz.Controller.game.completed, expected_count, "finite multiplayer game closes exactly the authored round count")
+        equal(host.quiz.Controller.game.state, "finished", "finite model finishes before the final presentation is dismissed")
         equal(host.view().state, "results", "host keeps the final answer visible during its reveal")
         equal(player.view().state, "results", "participant keeps the final answer visible during its reveal")
         check(host.call("Main", "IsRunning"), "final multiplayer reveal retains live authority until its end")
         final_packets = captured_results(world.packets, host, player)
         check(final_packets and final_packets[-1][0][2] == str(int(previous_id)), "last question's complete receipt precedes session shutdown")
-        next_id = host.lua.globals().OrbitQuizDB.nextQuestionId
+        next_id = host.lua.globals().OrbitGamesDB.modes.quiz.nextQuestionId
         world.until(lambda: player.view().state == "stopped")
         equal(host.quiz.Session.hostSession, None, "finite host ends itself without a manual Stop")
         world.until(lambda: len(player.games()) == 0)
         world.advance(20)
-        equal(host.lua.globals().OrbitQuizDB.nextQuestionId, next_id, "completed finite multiplayer games do not restart")
+        equal(host.lua.globals().OrbitGamesDB.modes.quiz.nextQuestionId, next_id,
+              "completed finite multiplayer games do not restart")
         equal(player.personal(rules_id).answers, expected_count, "session shutdown and receipt retries never double award the last answer")
         for node in world.nodes:
             equal(len(node.test.errors), 0, "finite multiplayer rules introduce no Lua errors")
@@ -1567,7 +1725,7 @@ def run_suite():
     ok(host.call("Main", "Start", setup), "long locked-answer recovery fixture starts")
     ok(player.call("Session", "JoinHost", host.name), "locked-answer recovery participant joins")
     world.until(lambda: player.view().state == "open")
-    round_ = host.quiz.Main.game.round
+    round_ = host.quiz.Controller.game.round
     ok(player.call("Session", "SubmitAnswer", 2), "original locked answer is selected")
     world.until(lambda: player.view().confirmedSelected == 2 and not player.view().pending)
     original_answer = player.answer_on(host)
@@ -1672,16 +1830,16 @@ def run_suite():
     ok(host.call("Main", "Start", setup), "finite restriction-reveal fixture starts")
     ok(player.call("Session", "JoinHost", host.name), "finite restriction-reveal participant joins")
     world.until(lambda: player.view().state == "open")
-    round_ = host.quiz.Main.game.round
+    round_ = host.quiz.Controller.game.round
     ok(player.call("Session", "SubmitAnswer", 2), "finite question accepts its final answer")
     world.until(lambda: player.view().confirmedSelected == 2 and not player.view().pending)
     final_points = player.answer_on(host).points
     host.test.now = round_.deadline
     player.test.now = round_.deadline
     host.call("Main", "CloseQuestion", host.test.now)
-    equal(host.quiz.Main.game.state, "finished", "the finite result closes before restriction suppresses transport")
+    equal(host.quiz.Controller.game.state, "finished", "the finite result closes before restriction suppresses transport")
     equal(player.personal(rules_id), None, "the final receipt is still queued when restriction begins")
-    original_reveal_end = host.quiz.Main.nextAutoAt
+    original_reveal_end = host.quiz.Controller.nextAutoAt
     host.event("ADDON_RESTRICTION_STATE_CHANGED", 5, 1)
     host.test.restricted = True
     world.advance(5)
@@ -1694,7 +1852,7 @@ def run_suite():
     host.test.restricted = False
     recovered_at = host.test.now
     host.event("ADDON_RESTRICTION_STATE_CHANGED", 5, 0)
-    refreshed_reveal_end = host.quiz.Main.nextAutoAt
+    refreshed_reveal_end = host.quiz.Controller.nextAutoAt
     equal(refreshed_reveal_end, recovered_at + 3, "restriction recovery starts a full new final-reveal interval")
     world.until(lambda: player.view().correctIndex is not None)
     world.until(lambda: player.quiz.Widget.scoreAnimation.playCalls > 0, seconds=1)
@@ -1740,7 +1898,7 @@ def run_suite():
     equal(by_rules[beta_round.rulesKey].rules.version, 2, "new authored rule revision is retained")
     beta.call("Main", "Stop")
     world.until(lambda: player.view().state == "stopped")
-    reloaded = Node("Rulesplayeralt", saved=saved_copy(player.lua.globals().OrbitQuizDB))
+    reloaded = Node("Rulesplayeralt", saved=saved_copy(player.lua.globals().OrbitGamesDB))
     reloaded_rows = [row for row in reloaded.call("PersonalScores", "GetScoreRows").values() if row.id == "revised-rules"]
     equal(len(reloaded_rows), 2, "rules-specific score rows survive an account-character reload")
     equal({row.rulesKey: row.score for row in reloaded_rows}, {alpha_round.rulesKey: alpha_points, beta_round.rulesKey: beta_points},
@@ -1752,7 +1910,7 @@ def run_suite():
     host.lua.execute("""
         local choices = {}
         for index = 1, 6 do choices[index] = string.rep('x', 99)..index end
-        assert(OrbitQuiz:RegisterQuestionPack({id='capacity-'..string.rep('x', 39), title=string.rep('t', 64),
+        assert(OrbitGames.Quiz:RegisterPack({id='capacity-'..string.rep('x', 39), title=string.rep('t', 64),
             version=2147483647,
             rules={version=2147483647, correctPoints=1000, speedBonusPerSecond=10,
                 wrongPenaltyStart=1000, wrongPenaltyEnd=1000, wrongPenaltyCurve=10,
@@ -1767,29 +1925,29 @@ def run_suite():
     for node in world.nodes[1:]:
         ok(node.call("Session", "JoinHost", host.name), "full capacity join")
     world.until(lambda: all(node.view().state == "open" for node in world.nodes[1:]), seconds=40)
-    first_id = host.quiz.Main.game.round.id
-    world.until(lambda: host.quiz.Main.game.round.id != first_id and host.quiz.Main.game.state == "open", seconds=50)
-    check(all(peer.readyId == host.quiz.Main.game.round.id for peer in host.quiz.Session.peers.values()),
+    first_id = host.quiz.Controller.game.round.id
+    world.until(lambda: host.quiz.Controller.game.round.id != first_id and host.quiz.Controller.game.state == "open", seconds=50)
+    check(all(peer.readyId == host.quiz.Controller.game.round.id for peer in host.quiz.Session.peers.values()),
           "full-size steady-state rounds open after all sixteen question readiness acknowledgements")
-    world.until(lambda: all(node.view().state == "open" and node.view().id == host.quiz.Main.game.round.id
+    world.until(lambda: all(node.view().state == "open" and node.view().id == host.quiz.Controller.game.round.id
                             for node in world.nodes[1:]), seconds=8)
-    equal(host.lua.eval("(function() local n=0 for _ in pairs(OrbitQuiz.Session.peers) do n=n+1 end return n end)()"), 16,
+    equal(host.lua.eval("(function() local n=0 for _ in pairs(OrbitGames.Quiz.Session.peers) do n=n+1 end return n end)()"), 16,
           "host retains all sixteen ready participants")
     for node in world.nodes[1:]:
         equal(len(node.view().choices), 6, "all sixteen clients receive all six maximum-byte choices")
         equal(node.view().difficulty, "very_hard", "all sixteen clients receive difficulty")
         equal(node.view().era, "e" * 64, "all sixteen clients receive maximum-byte era metadata")
-        equal(node.view().rulesKey, host.quiz.Main.game.rulesKey, "all sixteen clients receive the same maximum-sized scoring rules")
+        equal(node.view().rulesKey, host.quiz.Controller.game.rulesKey, "all sixteen clients receive the same maximum-sized scoring rules")
         equal(node.view().rules.correctPoints, 1000, "all sixteen clients decode the author's high-value score bounds")
         equal(node.view().packVersion, 2147483647, "full-capacity delivery retains the maximum content revision")
-    check(host.quiz.Comms.queueCount < 128, "normal maximum capacity does not exhaust transport queue")
-    round_ = host.quiz.Main.game.round
+    check(host.games_root.Comms.queueCount < 128, "normal maximum capacity does not exhaust transport queue")
+    round_ = host.quiz.Controller.game.round
     for node in world.nodes[1:]:
         ok(node.call("Session", "SubmitAnswer", round_.correctIndex), "full-capacity player can select any of six choices")
     world.until(lambda: all(node.view().confirmedSelected == round_.correctIndex for node in world.nodes[1:]), seconds=8)
     world.until(lambda: all(node.view().correctIndex is not None for node in world.nodes[1:]), seconds=15)
-    equal(host.quiz.Main.game.lastResult.totalAnswers, 16, "all sixteen six-choice answers score exactly once")
-    equal(host.quiz.Main.game.lastResult.correctCount, 16, "all sixteen six-choice answers retain the correct mapping")
+    equal(host.quiz.Controller.game.lastResult.totalAnswers, 16, "all sixteen six-choice answers score exactly once")
+    equal(host.quiz.Controller.game.lastResult.correctCount, 16, "all sixteen six-choice answers retain the correct mapping")
     host.call("Main", "Stop")
     world.until(lambda: all(node.view().state == "stopped" for node in world.nodes[1:]), seconds=8)
     for node in world.nodes:
@@ -1821,7 +1979,7 @@ def run_suite():
     for expected_streak in range(1, 6):
         world.until(lambda: all(node.view().state == "open" and node.view().id != previous_round for node in world.nodes),
                     seconds=30)
-        round_ = host.quiz.Main.game.round
+        round_ = host.quiz.Controller.game.round
         if expected_streak == 5:
             old_request = player.quiz.Session.client.request
             player.test.restricted = True
@@ -1888,7 +2046,7 @@ def run_suite():
     host.lua.execute("""
         local choices = {}
         for index=1,6 do choices[index]=string.rep('x',99)..index end
-        assert(OrbitQuiz:RegisterQuestionPack({id='toast-capacity', title=string.rep('t',64),
+        assert(OrbitGames.Quiz:RegisterPack({id='toast-capacity', title=string.rep('t',64),
             rules={shuffleQuestions=false,shuffleChoices=false}, questions={
                 {id='full',prompt=string.rep('q',160),choices=choices,correctIndex=6,
                 difficulty='very_hard',era=string.rep('e',64)}
@@ -1899,13 +2057,13 @@ def run_suite():
     ok(host.call("Main", "Start", setup), "six-choice sixteen-peer milestone stress game starts")
     for node in peers:
         ok(node.call("Session", "JoinHost", host.name), "milestone stress participant joins")
-    initial_id = host.quiz.Main.game.round.id
-    world.until(lambda: host.quiz.Main.game.round.id != initial_id and host.quiz.Main.game.state == "open", seconds=50)
+    initial_id = host.quiz.Controller.game.round.id
+    world.until(lambda: host.quiz.Controller.game.round.id != initial_id and host.quiz.Controller.game.state == "open", seconds=50)
     previous_round = initial_id
     for expected_streak in range(1, 6):
         world.until(lambda: all(node.view().state == "open" and node.view().id != previous_round for node in world.nodes),
                     seconds=45)
-        round_ = host.quiz.Main.game.round
+        round_ = host.quiz.Controller.game.round
         check(all(peer.readyId == round_.id for peer in host.quiz.Session.peers.values()),
               "background name prefetch cannot consume the twenty-second full-capacity readiness window")
         for node in world.nodes:
@@ -1913,18 +2071,18 @@ def run_suite():
         world.until(lambda: all(node.view().confirmedSelected == 6 and not node.view().pending for node in peers), seconds=8)
         world.until(lambda: all(node.view().correctIndex is not None and node.view().id == round_.id for node in peers),
                     seconds=20)
-        check(host.quiz.Comms.queueCount < 128, "milestone metadata cannot flood the bounded gameplay transport")
+        check(host.games_root.Comms.queueCount < 128, "milestone metadata cannot flood the bounded gameplay transport")
         previous_round = round_.id
     for node in world.nodes:
-        milestones = host.quiz.Main.game.lastResult.streakMilestones if node is host else node.view().streakMilestones
+        milestones = host.quiz.Controller.game.lastResult.streakMilestones if node is host else node.view().streakMilestones
         equal(len(milestones), 17, "a normal full-capacity fifth streak resolves every player")
         equal({event.name: event.streak for event in milestones.values()},
               {member.name: 5 for member in world.nodes}, "every participant receives the same seventeen-player milestone batch")
     final_receipt = next(fields for fields, _ in reversed(captured_results(world.packets, host, peers[-1]))
                          if int(fields[2]) == previous_round)
     check(len(final_receipt[22]) < 100, "all seventeen normal milestones fit in under one hundred result bytes")
-    world.until(lambda: host.quiz.Main.game.round.id != previous_round and host.quiz.Main.game.state == "open", seconds=30)
-    check(all(peer.readyId == host.quiz.Main.game.round.id for peer in host.quiz.Session.peers.values()),
+    world.until(lambda: host.quiz.Controller.game.round.id != previous_round and host.quiz.Controller.game.state == "open", seconds=30)
+    check(all(peer.readyId == host.quiz.Controller.game.round.id for peer in host.quiz.Session.peers.values()),
           "the question after a seventeen-toast result still waits for all peers without readiness expiry")
     host.call("Main", "Stop")
     world.until(lambda: all(node.view().state == "stopped" for node in peers), seconds=8)

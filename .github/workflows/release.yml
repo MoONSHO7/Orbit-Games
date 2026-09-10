@@ -22,9 +22,8 @@ jobs:
     permissions:
       contents: write
     concurrency:
-      group: orbit-quiz-release-package
+      group: orbit-games-release-package
       cancel-in-progress: false
-      queue: max
     env:
       RELEASE_TAG: ${{ github.ref_name }}
     steps:
@@ -65,8 +64,8 @@ jobs:
         if: steps.release-tag.outputs.publish == 'true'
         shell: bash
         run: |
-          sed -i -E "s/^Quiz\.version = \"[^\"]*\"$/Quiz.version = \"$RELEASE_TAG\"/" App/Init.lua
-          grep -Fx "Quiz.version = \"$RELEASE_TAG\"" App/Init.lua
+          sed -i -E "s/^Games\.version = \"[^\"]*\"$/Games.version = \"$RELEASE_TAG\"/" App/Init.lua
+          grep -Fx "Games.version = \"$RELEASE_TAG\"" App/Init.lua
 
       - name: Build and publish addon
         if: steps.release-tag.outputs.publish == 'true'

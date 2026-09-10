@@ -4,22 +4,22 @@ local SESSION_ID = "preview-check.1"
 local FONT_NAME = "Toast preview saved font"
 local FONT_PATH = "Interface\\AddOns\\ToastPreviewTest\\Saved.ttf"
 local TOAST_SECONDS = 3.2
-local CAPTION_PULSE_STREAK = 10
 local EPSILON = 0.000001
 local SOUND_FILES = {
-    "dominating.mp3",
-    "ownage.mp3",
-    "rampage.mp3",
-    "wicked-sick.mp3",
-    "holyshit.mp3",
-    "godlike.mp3",
-    "godlike.mp3",
+    "Playback\\dominating-100.ogg",
+    "Playback\\ownage-100.ogg",
+    "Playback\\rampage-100.ogg",
+    "Playback\\wicked-sick-100.ogg",
+    "Playback\\holyshit-100.ogg",
+    "Playback\\godlike-100.ogg",
+    "Playback\\godlike-100.ogg",
 }
 
-return function(Quiz, development)
+return function(Games, development)
+    local Quiz = Games.Quiz
     local assertions = 0
-    local Dev, Widget, Toasts = Quiz.Development, Quiz.Widget, Quiz.StreakToasts
-    local Main, Session, Store, UI = Quiz.Main, Quiz.Session, Quiz.Store, Quiz.UI
+    local Dev, Widget, Toasts = Games.Development, Quiz.Widget, Quiz.StreakToasts
+    local Main, Session, Store, UI = Games.Main, Quiz.Session, Quiz.Store, Games.UI
     local rules = assert(Quiz.Rules.Normalize({ shuffleChoices = false }))
     local rulesKey = Quiz.Rules.Encode(rules)
     local function Check(value, message)
@@ -68,14 +68,14 @@ return function(Quiz, development)
     end
     local function World()
         return {
-            saved = OrbitQuizDB,
+            saved = OrbitGamesDB,
             store = Store.db,
             session = Session,
-            game = Main.game,
+            game = Quiz.Controller.game,
             main = Main,
-            discovery = Quiz.Discovery,
-            comms = Quiz.Comms,
-            identity = Quiz.Identity,
+            discovery = Games.Discovery,
+            comms = Games.Comms,
+            identity = Games.Identity,
             sends = #Test.addonSent,
             publicSends = #Test.sent,
             channelJoins = #Test.joins,
@@ -84,12 +84,14 @@ return function(Quiz, development)
     end
     local function Quiet(action, message)
         local previous = Clone(World())
-        local database, game, client, peerTable = Store.db, Main.game, Session.client, Session.peers
+        local root, database, game, client, peerTable =
+            OrbitGamesDB, Store.db, Quiz.Controller.game, Session.client, Session.peers
         action()
         Equal(World(), previous, message)
         Same(Store.db, database, message .. " keeps the same database")
-        Same(OrbitQuizDB, database, message .. " keeps SavedVariables ownership")
-        Same(Main.game, game, message .. " keeps the same game")
+        Same(OrbitGamesDB, root, message .. " keeps SavedVariables ownership")
+        Same(OrbitGamesDB.modes.quiz, database, message .. " keeps Quiz storage under the root")
+        Same(Quiz.Controller.game, game, message .. " keeps the same game")
         Same(Session.client, client, message .. " keeps the same membership")
         Same(Session.peers, peerTable, message .. " keeps the same host peers")
     end
@@ -106,7 +108,7 @@ return function(Quiz, development)
         Same(Toasts.queueCount, 0, "finished preview retains no sample backlog")
         Same(Toasts.soundHandle, nil, "finished preview owns no sound handle")
         Same(Toasts.animation:IsPlaying(), false, "finished preview has no active animation")
-        Same(Toasts.captionAnimation:IsPlaying(), false, "finished preview has no retained caption pulse")
+        Same(Toasts.captionAnimation, nil, "finished preview has no caption scale animation")
         Same(Toasts.frame:GetScript("OnUpdate"), nil, "finished preview has no retained audio poll")
         Same(Toasts.frame:IsShown(), false, "finished preview shows no ribbon")
         Same(Widget.frame:IsShown(), shown == true, "HUD visibility follows actual game or edit mode")
@@ -143,7 +145,7 @@ return function(Quiz, development)
     end
     local function RegisterRealPack()
         Check(
-            Quiz:RegisterQuestionPack({
+            Quiz:RegisterPack({
                 id = PACK_ID,
                 title = "Actual quiz, not a preview",
                 rules = rules,
@@ -166,19 +168,19 @@ return function(Quiz, development)
         Same(Widget.streakPreview, nil, "real hosting clears the sample preview")
         Same(Toasts.active, nil, "real hosting cancels sample audio and animation")
         Same(Toasts.queueCount, 0, "sample backlog never spills into a real game")
-        Same(Widget.prompt:GetText(), Main.game.round.prompt, "real question replaces the sample content")
+        Same(Widget.prompt:GetText(), Quiz.Controller.game.round.prompt, "real question replaces the sample content")
         for streak = 1, 5 do
-            local round = Main.game.round
+            local round = Quiz.Controller.game.round
             Check(Session:SubmitAnswer(round.correctIndex), "real host can answer normally")
             Test.Advance(round.deadline - Test.now)
-            Same(Main.game.state, "results", "real answers close under the pack rules")
+            Same(Quiz.Controller.game.state, "results", "real answers close under the pack rules")
             if streak < 5 then
-                Test.Advance(Main.game.rules.revealSeconds)
+                Test.Advance(Quiz.Controller.game.rules.revealSeconds)
             end
         end
-        Same(Toasts.active.name, Quiz.Identity.name, "real fifth-correct result still produces a toast")
+        Same(Toasts.active.name, Games.Identity.name, "real fifth-correct result still produces a toast")
         Same(Toasts.active.streak, 5, "real streak count is separate from the sample sequence")
-        Same(Toasts.nameText:GetText(), Quiz.Identity.name, "real toast names the actual player")
+        Same(Toasts.nameText:GetText(), Games.Identity.name, "real toast names the actual player")
     end
 
     Same(Widget.streakPreview, nil, "startup never enables a toast preview")
@@ -187,9 +189,9 @@ return function(Quiz, development)
     Same(_G.Orbit, nil, "toast previews do not require Orbit")
     if not development then
         Same(Dev, nil, "packaged addon has no development module")
-        Same(SLASH_ORBITQUIZDEV1, nil, "packaged addon has no developer command")
-        Same(SlashCmdList.ORBITQUIZDEV, nil, "packaged addon has no developer command handler")
-        for key in pairs(Quiz.L) do
+        Same(SLASH_ORBITGAMESDEV1, nil, "packaged addon has no developer command")
+        Same(SlashCmdList.ORBITGAMESDEV, nil, "packaged addon has no developer command handler")
+        for key in pairs(Games.L) do
             Check(not key:match("^DEV_"), "packaged addon includes no sample-only localization")
         end
         RegisterRealPack()
@@ -197,16 +199,16 @@ return function(Quiz, development)
         Drain()
         Same(Widget.frame:IsShown(), true, "draining a real toast cannot close a hosted quiz")
         Same(Session:GetView().state, "results", "drained feedback cannot change the actual question state")
-        Same(Main.game.completed, 5, "real scoring works without the developer module")
+        Same(Quiz.Controller.game.completed, 5, "real scoring works without the developer module")
         Same(#Test.soundCalls, 1, "packaged game plays only the earned milestone")
         Main:Stop()
         return assertions
     end
 
     Same(type(Dev.ShowToasts), "function", "source checkout exposes a dedicated local toast showcase")
-    Same(SLASH_ORBITQUIZDEV1, "/oqdev", "showcase shares the source-only developer command")
+    Same(SLASH_ORBITGAMESDEV1, "/ogdev", "showcase shares the source-only developer command")
     Quiet(function()
-        SlashCmdList.ORBITQUIZDEV("off")
+        SlashCmdList.ORBITGAMESDEV("off")
     end, "off without a preview does not affect state")
     Same(Widget.frame, nil, "off cannot allocate an unnecessary HUD")
     Same(UI.frame, nil, "off cannot open the setup dialog")
@@ -235,15 +237,15 @@ return function(Quiz, development)
         }),
         "fixture creates real saved progress before the local preview"
     )
-    local saved = Clone(OrbitQuizDB)
+    local saved = Clone(OrbitGamesDB)
     local soundStart = #Test.soundCalls
     local stopStart = #Test.stoppedSounds
     Quiet(function()
-        SlashCmdList.ORBITQUIZDEV("  TOASTS  ")
+        SlashCmdList.ORBITGAMESDEV("  TOASTS  ")
     end, "starting toast preview is entirely local")
     Check(Widget.streakPreview, "command installs a transient preview")
-    Same(Widget.packText:GetText(), Quiz.L.DEV_TOASTS_TITLE, "HUD clearly identifies the demonstration")
-    Same(UI.frame, nil, "toast command does not create or show the /oq dialog")
+    Same(Widget.packText:GetText(), Games.L.DEV_TOASTS_TITLE, "HUD clearly identifies the demonstration")
+    Same(UI.frame, nil, "toast command does not create or show the /og dialog")
     Check(Widget.frame:IsVisible(), "toast command shows the real Q/A widget directly")
     Same(Widget.frame.movable, false, "standalone toast preview does not enable dragging")
     Near(Widget.frame:GetScale(), 1.35, "preview uses the saved widget scale")
@@ -257,7 +259,6 @@ return function(Quiz, development)
     end
     Same(Widget.timer:GetScript("OnUpdate"), nil, "sample question needs no ticking game clock")
     local frames, animations, labels = #Test.frames, Test.animationCreations, Test.fontStringCreations
-    local pulseStart = Toasts.captionAnimation.playCalls
     local names = {}
     for index, filename in ipairs(SOUND_FILES) do
         local event = Toasts.active
@@ -265,16 +266,7 @@ return function(Quiz, development)
         Check(not names[event.name], "all seven sample players are distinct")
         names[event.name] = true
         Same(event.streak, index + 4, "sample streaks run from five through eleven in order")
-        Same(
-            Toasts.captionAnimation:IsPlaying(),
-            event.streak >= CAPTION_PULSE_STREAK,
-            "only Godlike sample captions pulse"
-        )
-        Same(
-            Toasts.captionAnimation.playCalls,
-            pulseStart + math.max(0, event.streak - CAPTION_PULSE_STREAK + 1),
-            "preview plays each high-streak caption pulse once"
-        )
+        Same(Toasts.captionAnimation, nil, "sample captions remain fixed at every streak tier")
         Same(Toasts.nameText:GetText(), event.name, "sample name is rendered by the real toast")
         Same(
             Toasts.captionText:GetText(),
@@ -285,7 +277,7 @@ return function(Quiz, development)
         Same(#Test.soundCalls, soundStart + index, "only the current sample begins playing")
         Same(
             Test.soundCalls[#Test.soundCalls].path,
-            "Interface\\AddOns\\Orbit-Quiz\\Assets\\Sounds\\" .. filename,
+            "Interface\\AddOns\\Orbit-Games\\Assets\\Sounds\\" .. filename,
             "showcase uses the exact bundled milestone clip"
         )
         Same(Count(Test.soundHandles), 1, "only one sample voice can be playing")
@@ -297,36 +289,7 @@ return function(Quiz, development)
     Same(Test.animationCreations, animations, "queue playback reuses native animation objects")
     Same(Test.fontStringCreations, labels, "queue playback reuses the text regions")
     Same(#Test.stoppedSounds, stopStart, "natural sample playback never cuts off any of the seven voices")
-    Equal(OrbitQuizDB, saved, "full preview leaves all saved progress and appearance untouched")
-    Cleared(false)
-    NoReplay(false)
-
-    Quiet(function()
-        Check(Dev:ShowToasts(), "fixture starts a preview before cancelling a high-streak pulse")
-        for _ = 1, 5 do
-            Test.AdvanceAnimations(TOAST_SECONDS + EPSILON)
-        end
-        Test.AdvanceAnimations(0.25)
-        Check(Toasts.captionAnimation:IsPlaying(), "Godlike preview reaches a live caption pulse")
-        local pulseStops = Toasts.captionAnimation.stopCalls
-        SlashCmdList.ORBITQUIZDEV("off")
-        Same(Toasts.captionAnimation.stopCalls, pulseStops + 1, "off cancels an active preview pulse")
-    end, "cancelling caption feedback has no gameplay or networking effects")
-    Cleared(false)
-    NoReplay(false)
-    Quiet(function()
-        Check(Dev:ShowToasts(), "fixture starts a preview before restarting a high-streak pulse")
-        for _ = 1, 5 do
-            Test.AdvanceAnimations(TOAST_SECONDS + EPSILON)
-        end
-        local pulseStops, pulsePlays = Toasts.captionAnimation.stopCalls, Toasts.captionAnimation.playCalls
-        Check(Dev:ShowToasts(), "preview can restart while a Godlike caption is pulsing")
-        Same(Toasts.active.streak, 5, "restarted preview begins with its lower milestone")
-        Same(Toasts.captionAnimation.stopCalls, pulseStops + 1, "restart cancels the old Godlike caption pulse")
-        Same(Toasts.captionAnimation.playCalls, pulsePlays, "restart does not pulse its first lower-streak caption")
-        Same(Toasts.captionAnimation:IsPlaying(), false, "restarted low streak retains no high-streak animation")
-        SlashCmdList.ORBITQUIZDEV("off")
-    end, "restarting caption feedback retains source-only preview isolation")
+    Equal(OrbitGamesDB, saved, "full preview leaves all saved progress and appearance untouched")
     Cleared(false)
     NoReplay(false)
 
@@ -382,7 +345,7 @@ return function(Quiz, development)
     local activeHandle = Toasts.soundHandle
     soundStart = #Test.soundCalls
     Quiet(function()
-        SlashCmdList.ORBITQUIZDEV("streaks")
+        SlashCmdList.ORBITGAMESDEV("streaks")
     end, "alias restarts the sample sequence without a new session")
     Same(Toasts.active.streak, 5, "repeating the command restarts from Dominating")
     Same(Toasts.queueCount, 6, "restart replaces rather than appends to the old sample queue")
@@ -391,13 +354,13 @@ return function(Quiz, development)
     Same(#Test.soundCalls, soundStart + 1, "restart plays the first sample once")
     Same(#Test.frames, frames, "restarting reuses the existing widget")
     Quiet(function()
-        SlashCmdList.ORBITQUIZDEV("off")
+        SlashCmdList.ORBITGAMESDEV("off")
     end, "off cancels the sample without touching game state")
     Cleared(false)
     NoReplay(false)
     Quiet(function()
         StartAudioTail()
-        SlashCmdList.ORBITQUIZDEV("off")
+        SlashCmdList.ORBITGAMESDEV("off")
         PollAudio(10)
     end, "off cancels a waiting audio tail without any delayed replay")
     Cleared(false)
@@ -417,7 +380,7 @@ return function(Quiz, development)
     Test.restricted = true
     Quiet(function()
         Check(Dev:ShowToasts(), "an idle local showcase does not require chat permissions")
-        SlashCmdList.ORBITQUIZDEV("off")
+        SlashCmdList.ORBITGAMESDEV("off")
     end, "restricted chat cannot turn the local showcase into a network operation")
     Test.restricted = false
     Cleared(false)
@@ -429,10 +392,10 @@ return function(Quiz, development)
     UI:Toggle()
     Check(UI.frame:IsShown() and Widget.editing, "fixture opens normal positioning mode")
     Same(Widget.streakPreview, openingPreview, "first-time setup creation preserves the running local preview")
-    Same(Toasts.active, openingToast, "opening /oq does not restart a running sample")
-    Same(Toasts.soundHandle, openingHandle, "opening /oq preserves the sample audio handle")
-    Same(Toasts.frame:GetScript("OnUpdate"), openingPoll, "opening /oq preserves an unfinished sample's poll")
-    Same(#Test.soundCalls, soundStart, "opening /oq does not replay the sample voice")
+    Same(Toasts.active, openingToast, "opening /og does not restart a running sample")
+    Same(Toasts.soundHandle, openingHandle, "opening /og preserves the sample audio handle")
+    Same(Toasts.frame:GetScript("OnUpdate"), openingPoll, "opening /og preserves an unfinished sample's poll")
+    Same(#Test.soundCalls, soundStart, "opening /og does not replay the sample voice")
     Quiet(function()
         PollAudio(2.1)
         Drain()
@@ -443,7 +406,7 @@ return function(Quiz, development)
     StartAudioTail()
     Quiet(function()
         UI.frame:Hide()
-    end, "closing /oq cancels only its transient sample content")
+    end, "closing /og cancels only its transient sample content")
     Cleared(false)
     NoReplay(false)
     UI:Toggle()
@@ -486,15 +449,12 @@ return function(Quiz, development)
         local active, handle = Toasts.active, Toasts.soundHandle
         local pending, starts, stops = Toasts.queueCount, #Test.soundCalls, #Test.stoppedSounds
         local animationPlays, animationStops = Toasts.animation.playCalls, Toasts.animation.stopCalls
+        local visibleMessages = #Test.messages
         Quiet(function()
             Check(not Dev:ShowToasts(), "preview command rejects an actual quiz membership")
-            SlashCmdList.ORBITQUIZDEV("toasts")
+            SlashCmdList.ORBITGAMESDEV("toasts")
         end, message)
-        Same(
-            Test.messages[#Test.messages]:sub(-#Quiz.L.DEV_TOASTS_ACTIVE),
-            Quiz.L.DEV_TOASTS_ACTIVE,
-            "rejected command explains that the live game was not changed"
-        )
+        Same(#Test.messages, visibleMessages, "rejected preview emits no visible chat")
         Same(Toasts.active, active, "rejected preview preserves any active real announcement")
         Same(Toasts.soundHandle, handle, "rejected preview preserves the current real sound handle")
         Same(Toasts.queueCount, pending, "rejected preview preserves queued real announcements")
@@ -507,7 +467,7 @@ return function(Quiz, development)
     Blocked("active host results cannot be replaced by dummy achievements")
     local realToast, realHandle = Toasts.active, Toasts.soundHandle
     Quiet(function()
-        SlashCmdList.ORBITQUIZDEV("off")
+        SlashCmdList.ORBITGAMESDEV("off")
     end, "off without a sample does not stop a real achievement")
     Same(Toasts.active, realToast, "developer off preserves active real feedback")
     Same(Toasts.soundHandle, realHandle, "developer off preserves active real audio")
@@ -522,7 +482,7 @@ return function(Quiz, development)
     Same(Toasts.frame:GetScript("OnUpdate"), nil, "real joining cancels the preview audio-tail poll")
     Blocked("even an unfinished join prevents a sample preview")
     local client = Session.client
-    Session:Receive(HOST, { "W", client.request, SESSION_ID, "Real quiz", "0" })
+    Session:Receive(HOST, { "W", client.request, SESSION_ID, "0" })
     Blocked("waiting for a real question prevents a sample preview")
     Session:Receive(HOST, {
         "Q",

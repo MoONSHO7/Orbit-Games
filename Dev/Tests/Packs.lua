@@ -1,4 +1,5 @@
-return function(Quiz)
+return function(Games)
+    local Quiz = Games.Quiz
     local assertions = 0
     local function Check(value, message)
         assertions = assertions + 1
@@ -24,36 +25,36 @@ return function(Quiz)
         return { id = id or "test_invalid", title = "Test Pack", questions = { Question() } }
     end
     local function Metadata(id)
-        for _, metadata in ipairs(Quiz:GetQuestionPacks()) do
+        for _, metadata in ipairs(Quiz:GetPacks()) do
             if metadata.id == id then
                 return metadata
             end
         end
     end
     local function Reject(pack, message)
-        local count = #Quiz:GetQuestionPacks()
+        local count = #Quiz:GetPacks()
         local errorsBefore = #Quiz:GetPackErrors()
-        local accepted, errorText = Quiz:RegisterQuestionPack(pack)
+        local accepted, errorText = Quiz:RegisterPack(pack)
         Same(accepted, false, message)
         Check(type(errorText) == "string" and errorText ~= "", "rejection has an error message")
-        Same(#Quiz:GetQuestionPacks(), count, "failed registration must not change the registry")
+        Same(#Quiz:GetPacks(), count, "failed registration must not change the registry")
         local errors = Quiz:GetPackErrors()
         Same(#errors, errorsBefore + 1, "failed registration records one error")
         Same(errors[#errors], errorText, "returned error matches retained error")
     end
 
     local originalCount = #Quiz:GetQuestions("all")
-    local bundledRules, bundledKey = Quiz:GetPackRules("all")
+    local bundledRules, bundledKey = Quiz:GetRules("all")
     Check(bundledRules ~= nil, "the sole bundled quiz defines compatible all-pack rules")
     Same(Quiz.Rules.Encode(bundledRules), bundledKey, "all-pack rules expose a canonical immutable identity")
     bundledRules.correctPoints = 999
-    Check(Quiz:GetPackRules("all").correctPoints ~= 999, "all-pack rules are detached registry copies")
+    Check(Quiz:GetRules("all").correctPoints ~= 999, "all-pack rules are detached registry copies")
     local valid = Pack("test_valid")
     valid.title = " Test Pack "
     valid.author = " Test Author "
     valid.questions[1].prompt = " Choose the second answer. "
     valid.questions[1].choices[1] = " Alpha "
-    Check(Quiz:RegisterQuestionPack(valid), "ordinary pack registers")
+    Check(Quiz:RegisterPack(valid), "ordinary pack registers")
     local metadata = Metadata("test_valid")
     Same(metadata.title, "Test Pack", "title is trimmed")
     Same(metadata.author, "Test Author", "author is trimmed")
@@ -148,7 +149,7 @@ return function(Quiz)
     Reject(duplicatedQuestion, "duplicate question id rejects the entire pack")
     Same(Quiz:GetQuestions("test_repair"), nil, "partial pack is never visible")
     duplicatedQuestion.questions[2].id = "second"
-    Check(Quiz:RegisterQuestionPack(duplicatedQuestion), "corrected rejected pack can be registered")
+    Check(Quiz:RegisterPack(duplicatedQuestion), "corrected rejected pack can be registered")
     Same(#Quiz:GetQuestions("test_repair"), 2, "all repaired questions register together")
 
     for _, prompt in ipairs({
@@ -247,7 +248,7 @@ return function(Quiz)
     boundaryPack.questions[1].era = string.rep("e", 64)
     boundaryPack.questions[1].difficulty = "very_hard"
     boundaryPack.questions[1].source = "https://example.org/" .. string.rep("s", 492)
-    Check(Quiz:RegisterQuestionPack(boundaryPack), "exact byte limits are accepted")
+    Check(Quiz:RegisterPack(boundaryPack), "exact byte limits are accepted")
     Same(Metadata("test_boundaries").locale, "frFR", "pack language metadata is preserved")
     local bounded = Quiz:GetQuestions("test_boundaries")[1]
     Same(bounded.era, boundaryPack.questions[1].era, "maximum era bytes survive normalization")
@@ -257,7 +258,7 @@ return function(Quiz)
     optional.questions[1].explanation = nil
     optional.questions[1].category = nil
     optional.questions[1].extra = { arbitrary = true }
-    Check(Quiz:RegisterQuestionPack(optional), "optional text may be omitted")
+    Check(Quiz:RegisterPack(optional), "optional text may be omitted")
     Same(Quiz:GetQuestions("test_optional")[1].extra, nil, "unknown fields are not copied")
     for _, field in ipairs({ "difficulty", "era", "source" }) do
         Same(Quiz:GetQuestions("test_optional")[1][field], nil, "old companion packs do not need " .. field)
@@ -274,7 +275,7 @@ return function(Quiz)
         end
     end
     Same(Quiz:GetQuestions("test_valid")[1].choices[2], "Beta", "combined pool also returns copies")
-    local packs = Quiz:GetQuestionPacks()
+    local packs = Quiz:GetPacks()
     for index = 2, #packs do
         local previous, current = packs[index - 1], packs[index]
         Check(
@@ -292,6 +293,7 @@ return function(Quiz)
     Check(type(missingError) == "string", "missing argument returns error message")
     local errors = Quiz:GetPackErrors()
     local firstError = errors[1]
+    Same(Quiz.HostPage:GetNotice(), firstError, "the Host notice lane exposes the first pack validation error")
     errors[1] = "mutated diagnostic"
     errors[#errors + 1] = "injected diagnostic"
     Same(Quiz:GetPackErrors()[1], firstError, "diagnostics are copied")
@@ -307,7 +309,7 @@ return function(Quiz)
             authored.correctIndex = count
             authored.difficulty, authored.era = difficulty, " Warcraft III "
             authored.source = "https://warcraft.wiki.gg/wiki/Warcraft_III:_Reign_of_Chaos"
-            Check(Quiz:RegisterQuestionPack(pack), "all supported choice counts and difficulty labels register")
+            Check(Quiz:RegisterPack(pack), "all supported choice counts and difficulty labels register")
             local registered = Quiz:GetQuestions(pack.id)[1]
             Same(#registered.choices, count, "normalization retains all authored choices")
             Same(registered.correctIndex, count, "the last of four to six choices can be correct")
@@ -348,11 +350,8 @@ return function(Quiz)
         streakBonusMax = 1,
     }
     local canonical = Quiz.Rules.Encode(authoredRules.rules)
-    Check(
-        Quiz:RegisterQuestionPack(authoredRules),
-        "the pack author may supply basic mechanics and a capped streak bonus"
-    )
-    local packRules, packRulesKey = Quiz:GetPackRules(authoredRules.id)
+    Check(Quiz:RegisterPack(authoredRules), "the pack author may supply basic mechanics and a capped streak bonus")
+    local packRules, packRulesKey = Quiz:GetRules(authoredRules.id)
     Same(packRulesKey, canonical, "registry returns the author's full normalized rule identity")
     Same(Quiz.Rules.Encode(packRules), canonical, "the copied rule object agrees with its key")
     local authoredMetadata = Metadata(authoredRules.id)
@@ -362,12 +361,12 @@ return function(Quiz)
     authoredRules.rules.correctPoints = 999
     authoredMetadata.rules.answerSeconds = 120
     packRules.streakBonusMax = 100
-    local untouched, untouchedKey = Quiz:GetPackRules(authoredRules.id)
+    local untouched, untouchedKey = Quiz:GetRules(authoredRules.id)
     Same(untouched.correctPoints, 2, "later author table mutation never changes registered scoring")
     Same(untouched.answerSeconds, 30, "selector metadata cannot retime the pack")
     Same(untouched.streakBonusMax, 1, "each rule retrieval is detached")
     Same(untouchedKey, canonical, "registry identity cannot drift after outside mutations")
-    local allRules, allReason = Quiz:GetPackRules("all")
+    local allRules, allReason = Quiz:GetRules("all")
     Same(allRules, nil, "different rules cannot be silently merged into one hosted quiz")
     Same(allReason, "incompatible_pack_rules", "mixed all-pack selection has an actionable stable reason")
     Check(#Quiz:GetQuestions("all") > originalCount, "mixed-rule content remains queryable without authorizing a game")
@@ -384,22 +383,22 @@ return function(Quiz)
     }) do
         local invalidPack = Pack("test_invalid_rules")
         invalidPack.rules = invalid
-        local before = #Quiz:GetQuestionPacks()
-        local accepted, message = Quiz:RegisterQuestionPack(invalidPack)
+        local before = #Quiz:GetPacks()
+        local accepted, message = Quiz:RegisterPack(invalidPack)
         Same(accepted, false, "invalid rules reject the complete question pack")
         Check(message:find("test_invalid_rules", 1, true) ~= nil, "rules errors identify the authored pack")
         Check(message:find("rules:", 1, true) ~= nil, "rules errors identify the invalid pack section")
-        Same(#Quiz:GetQuestionPacks(), before, "rejected rules do not partially register questions")
+        Same(#Quiz:GetPacks(), before, "rejected rules do not partially register questions")
         Same(Quiz:GetQuestions("test_invalid_rules"), nil, "invalid pack content remains unavailable")
     end
     local repair = Pack("test_invalid_rules")
     repair.rules = { answerSeconds = 20 }
-    Check(Quiz:RegisterQuestionPack(repair), "an author can correct and re-register a rejected rules definition")
+    Check(Quiz:RegisterPack(repair), "an author can correct and re-register a rejected rules definition")
     for _, invalid in ipairs({ false, "missing_pack", {}, 1 }) do
-        local absent, reason = Quiz:GetPackRules(invalid)
+        local absent, reason = Quiz:GetRules(invalid)
         Same(absent, nil, "unknown pack rules are never guessed from defaults")
         Check(type(reason) == "string" and reason ~= "", "unknown pack rules return context")
     end
-    Same(Quiz:GetPackRules(), nil, "an omitted pack ID is not the implicit default game")
+    Same(Quiz:GetRules(), nil, "an omitted pack ID is not the implicit default game")
     return assertions
 end

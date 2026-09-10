@@ -1,31 +1,9 @@
-local _, Quiz = ...
+local _, Games = ...
 local FONT_TYPE = "font"
 local MAX_FONT_NAME_LENGTH = 128
-local STREAK_SOUND_DIRECTORY = "Interface\\AddOns\\Orbit-Quiz\\Assets\\Sounds\\"
-local GODLIKE_STREAK = 10
-local STREAK_SOUNDS = {
-    [5] = "dominating",
-    [6] = "ownage",
-    [7] = "rampage",
-    [8] = "wicked-sick",
-    [9] = "holyshit",
-    [GODLIKE_STREAK] = "godlike",
-}
 
-Quiz.Media = { revision = 0 }
-local Media = Quiz.Media
-
-function Media:GetStreakSound(streak, volume)
-    local file = STREAK_SOUNDS[math.min(streak, GODLIKE_STREAK)]
-    volume = volume or Quiz.SOUND_VOLUME_DEFAULT
-    if not file or volume == Quiz.SOUND_VOLUME_MIN then
-        return
-    end
-    if volume == Quiz.SOUND_VOLUME_MAX then
-        return STREAK_SOUND_DIRECTORY .. file .. ".mp3"
-    end
-    return STREAK_SOUND_DIRECTORY .. "Volume\\" .. file .. "-" .. volume .. ".ogg"
-end
+Games.Media = { revision = 0, icon = "Interface\\AddOns\\Orbit-Games\\Assets\\Orbit.png" }
+local Media = Games.Media
 
 function Media:ResolveFont(name)
     if

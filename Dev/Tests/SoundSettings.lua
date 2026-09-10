@@ -1,6 +1,6 @@
 local EPSILON = 0.000001
 local TOAST_SECONDS = 3.2
-local SOUND_DIRECTORY = "Interface\\AddOns\\Orbit-Quiz\\Assets\\Sounds\\"
+local SOUND_DIRECTORY = "Interface\\AddOns\\Orbit-Games\\Assets\\Sounds\\"
 local SOUND_STEMS =
     { [5] = "dominating", [6] = "ownage", [7] = "rampage", [8] = "wicked-sick", [9] = "holyshit", [10] = "godlike" }
 local DATA_FIELDS = {
@@ -22,9 +22,11 @@ local GEOMETRY_CALLS = {
     "stringHeightMeasurements",
 }
 
-return function(Quiz)
+return function(Games)
+    local Quiz = Games.Quiz
     local assertions = 0
-    local Store, UI, Widget, Toasts, Media = Quiz.Store, Quiz.UI, Quiz.Widget, Quiz.StreakToasts, Quiz.Media
+    local Store, UI, Widget, Toasts, Media = Quiz.Store, Games.UI, Quiz.Widget, Quiz.StreakToasts, Games.Media
+    local SettingsPage, SoundMedia = Quiz.SettingsPage, Quiz.SoundMedia
     local function Check(value, message)
         assertions = assertions + 1
         assert(value, message)
@@ -65,7 +67,7 @@ return function(Quiz)
     local function Initialize(saved)
         local db, reason = Store:Initialize(saved)
         Check(db ~= nil, "sound preferences load: " .. tostring(reason))
-        Same(db.schemaVersion, 6, "sound preference does not change the score schema")
+        Same(db.schemaVersion, 7, "sound preference does not change the score schema")
         return db
     end
     local function ExpectedSound(streak, volume)
@@ -73,8 +75,7 @@ return function(Quiz)
         if not stem or volume == 0 then
             return nil
         end
-        return volume == 100 and SOUND_DIRECTORY .. stem .. ".mp3"
-            or SOUND_DIRECTORY .. "Volume\\" .. stem .. "-" .. volume .. ".ogg"
+        return SOUND_DIRECTORY .. "Playback\\" .. stem .. "-" .. volume .. ".ogg"
     end
 
     Same(Quiz.SOUND_VOLUME_MIN, 0, "volume includes mute")
@@ -82,7 +83,7 @@ return function(Quiz)
     Same(Quiz.SOUND_VOLUME_STEP, 10, "volume uses ten-percent steps")
     Same(Quiz.SOUND_VOLUME_DEFAULT, 100, "existing installations keep original loudness")
     Same(Initialize(nil).soundVolume, 100, "new installation defaults to full volume")
-    for version = 1, 6 do
+    for version = 1, 7 do
         local saved = { schemaVersion = version }
         Same(Initialize(saved).soundVolume, 100, "missing preference defaults across supported schemas")
         Same(saved.soundVolume, nil, "defaulting does not mutate the supplied database")
@@ -94,10 +95,14 @@ return function(Quiz)
         end
     end
     for streak = 4, 11 do
-        Same(Media:GetStreakSound(streak), ExpectedSound(streak, 100), "omitted volume preserves original MP3 mapping")
+        Same(
+            SoundMedia:GetStreakSound(streak),
+            ExpectedSound(streak, 100),
+            "omitted volume preserves original MP3 mapping"
+        )
         for volume = 0, 100, 10 do
             Same(
-                Media:GetStreakSound(streak, volume),
+                SoundMedia:GetStreakSound(streak, volume),
                 ExpectedSound(streak, volume),
                 "every volume selects its exact clip variant"
             )
@@ -128,26 +133,6 @@ return function(Quiz)
             },
         },
     })
-    Check(
-        Store:RecordRound("Saved league", "PUBLIC", {
-            id = 40,
-            questionKey = "saved:question",
-            number = 1,
-            duration = 15,
-            scoringVersion = 2,
-            answers = {
-                {
-                    guid = "Player-Saved",
-                    name = "Saved-TestRealm",
-                    choiceIndex = 1,
-                    correct = true,
-                    elapsed = 2,
-                    points = 2.3,
-                },
-            },
-        }),
-        "volume fixture includes existing signed-score history"
-    )
     local receiptRules = assert(Quiz.Rules.Normalize())
     local personalPoints = Quiz.Scoring.Calculate(true, 2, 15, receiptRules, 1)
     Check(
@@ -200,7 +185,7 @@ return function(Quiz)
     RejectSave(nil)
     for _, value in ipairs(invalidValues) do
         RejectSave(value)
-        for _, version in ipairs({ 3, 6 }) do
+        for _, version in ipairs({ 3, 7 }) do
             local saved = { schemaVersion = version, soundVolume = value }
             local before, personal = Copy(saved), Quiz.PersonalScores.data
             local loaded, reason = Store:Initialize(saved)
@@ -211,10 +196,7 @@ return function(Quiz)
             Equal(saved, before, "failed load leaves supplied data untouched")
         end
     end
-    Check(
-        Store:SaveSettings({ league = "Changed setup", soundVolume = 0 }),
-        "host setup remains independently writable"
-    )
+    Check(Store:SaveSettings({ packId = "all", soundVolume = 0 }), "Quiz setup remains independently writable")
     Check(Store:SaveWidgetSettings({ scale = 130, soundVolume = 0 }), "appearance remains independently writable")
     Check(Store:SaveWidgetPosition(0.31, 0.69), "widget anchor remains independently writable")
     Same(Store:GetSoundVolume(), 100, "other settings owners cannot overwrite sound volume")
@@ -225,9 +207,8 @@ return function(Quiz)
     db = Initialize(saved)
     Equal(db, saved, "reload retains volume beside scores, preferences and replay history")
     Same(Store:GetLegacyStandings("Archive", "PUBLIC")[1].score, 120, "old score scale remains untouched")
-    Same(Store:GetStandings("Saved league", "PUBLIC")[1].score, 2.3, "signed score archive remains untouched")
     Same(Quiz.PersonalScores:GetPack("warcraft-lore").score, personalPoints, "personal totals remain untouched")
-    OrbitQuizDB = db
+    OrbitGamesDB.modes.quiz = db
     data = Copy(db)
     for _, key in ipairs(DATA_FIELDS) do
         identities[key] = db[key]
@@ -253,7 +234,7 @@ return function(Quiz)
     UI:Toggle()
     UI:SetTab("settings")
     Same(Toasts.volume, 60, "renderer initializes from the persisted preference")
-    local row, slider = UI.volumeSlider, UI.volumeSlider.Slider.Slider
+    local row, slider = SettingsPage.volumeSlider, SettingsPage.volumeSlider.Slider.Slider
     Same(row.Label:GetText(), "Volume", "volume has a concise independent label")
     Same(row.template, "EditModeSettingSliderTemplate", "volume reuses the native inline settings row")
     Same(slider.template, "MinimalSliderTemplate", "volume reuses the native slider")
@@ -265,8 +246,8 @@ return function(Quiz)
     Same(slider:GetObeyStepOnDrag(), true, "native volume dragging obeys its step")
     Same(slider.narrationLabelRegion, row.Label, "native narration identifies the Volume label")
     Same(row.Value:GetText(), "60%", "persisted volume is formatted as a percentage")
-    Check(row:GetTop() < UI.fontRow:GetBottom(), "Volume sits below the Font row")
-    Check(row:GetBottom() > UI.widgetSettingsHelp:GetTop(), "Volume leaves space before the settings help")
+    Check(row:GetTop() < SettingsPage.fontRow:GetBottom(), "Volume sits below the Font row")
+    Same(SettingsPage.help, nil, "Quiz Settings creates no muted help block below Volume")
     for event, handler in pairs(slider.templateScripts) do
         Same(slider:GetScript(event), handler, "volume preserves native interaction handler: " .. event)
     end
@@ -302,8 +283,8 @@ return function(Quiz)
             Toasts.frame,
             Toasts.nameText,
             Toasts.captionText,
-            UI.scaleSlider,
-            UI.fontRow,
+            SettingsPage.scaleSlider,
+            SettingsPage.fontRow,
             row,
         }
     for _, choice in ipairs(Widget.choices) do
@@ -324,7 +305,7 @@ return function(Quiz)
         Same(Test.fontStringCreations, labels, "volume reuses existing labels")
         Same(Test.animationCreations, animations, "volume reuses existing native animations")
         Same(#Test.tickers, tickers, "volume creates no timer work")
-        Same(OrbitQuizDB, db, "volume retains SavedVariables ownership")
+        Same(OrbitGamesDB.modes.quiz, db, "volume retains SavedVariables ownership")
         for region, before in pairs(geometry) do
             for _, key in ipairs(GEOMETRY_CALLS) do
                 Same(region[key], before[key], "volume leaves layout untouched: " .. key)
@@ -341,7 +322,7 @@ return function(Quiz)
         slider:SetValue(volume)
         Same(saveCalls, before + 1, "each new native slider position saves exactly once")
         Same(Store:GetSoundVolume(), volume, "all eleven slider positions persist")
-        Same(UI.soundVolume, volume, "settings cache follows native slider input")
+        Same(SettingsPage.soundVolume, volume, "settings cache follows native slider input")
         Same(Toasts.volume, volume, "future playback follows native slider input")
         Same(row.Value:GetText(), volume .. "%", "every slider step displays a percent")
         Same(row.Slider.Back:IsEnabled(), volume > 0, "decrement respects the mute boundary")
@@ -355,7 +336,7 @@ return function(Quiz)
     Same(Store:GetSoundVolume(), 100, "native increment saves its higher volume")
     local calls = saveCalls
     row:SetValue(30)
-    UI:RefreshWidgetSettings()
+    SettingsPage:Refresh()
     Same(saveCalls, calls, "programmatic refresh never feeds back into persistence")
     Same(slider:GetValue(), 100, "refresh restores the actual saved preference")
     Stable()
@@ -419,17 +400,17 @@ return function(Quiz)
     )
     Test.AdvanceAnimations(0.25)
     local visual, handle, stopped = Visual(), Toasts.soundHandle, #Test.stoppedSounds
-    UI:SaveSoundVolume(55)
+    SettingsPage:SaveSoundVolume(55)
     Same(UI.actionError, Quiz.L.errors.invalid_sound_volume, "invalid UI save exposes the localized validation error")
     Same(Toasts.soundHandle, handle, "invalid UI save leaves current playback untouched")
     Same(#Test.stoppedSounds, stopped, "invalid UI save stops nothing")
     SameVisual(visual)
-    UI:SaveSoundVolume(100)
+    SettingsPage:SaveSoundVolume(100)
     Same(Toasts.soundHandle, handle, "saving unchanged volume preserves current playback")
     Same(#Test.stoppedSounds, stopped, "unchanged volume does not stop a sound")
-    UI:SaveSoundVolume(0)
+    SettingsPage:SaveSoundVolume(0)
     Same(Toasts.volume, 0, "mute reaches the renderer immediately")
-    Same(UI.soundVolume, 0, "direct mute updates the settings cache")
+    Same(SettingsPage.soundVolume, 0, "direct mute updates the settings cache")
     Same(slider:GetValue(), 0, "direct mute refreshes the native slider")
     Same(row.Value:GetText(), "0%", "direct mute refreshes the displayed percentage")
     Same(Toasts.soundHandle, nil, "mute clears its owned handle")
@@ -437,7 +418,7 @@ return function(Quiz)
     Same(#Test.stoppedSounds, stopped + 1, "mute stops exactly one sound")
     Same(Test.soundHandles[foreignHandle], true, "mute cannot stop another addon's sound")
     SameVisual(visual)
-    UI:SaveSoundVolume(50)
+    SettingsPage:SaveSoundVolume(50)
     Same(#Test.soundCalls, soundCount + 1, "unmuting never replays the current clip")
     SameVisual(visual)
     Test.AdvanceAnimations(TOAST_SECONDS)
@@ -448,12 +429,12 @@ return function(Quiz)
         "queued clip resolves the latest quieter volume at playback"
     )
     visual, handle, stopped = Visual(), Toasts.soundHandle, #Test.stoppedSounds
-    UI:SaveSoundVolume(30)
+    SettingsPage:SaveSoundVolume(30)
     Same(Toasts.soundHandle, handle, "changing between audible levels preserves the current old-level clip")
     Same(Test.soundHandles[handle], true, "audible level changes let the current clip finish")
     Same(#Test.stoppedSounds, stopped, "an audible level change stops no native audio")
     SameVisual(visual)
-    UI:SaveSoundVolume(0)
+    SettingsPage:SaveSoundVolume(0)
     Same(Test.stoppedSounds[#Test.stoppedSounds], handle, "mute still immediately stops the old-level clip")
     Same(#Test.stoppedSounds, stopped + 1, "only the explicit mute stops this clip")
     calls = #Test.soundCalls
@@ -462,7 +443,7 @@ return function(Quiz)
     Same(Toasts.soundHandle, nil, "muted visual has no audio handle")
     Same(#Test.soundCalls, calls, "zero volume skips playback instead of making a silent native call")
     visual = Visual()
-    UI:SaveSoundVolume(80)
+    SettingsPage:SaveSoundVolume(80)
     Same(#Test.soundCalls, calls, "unmuting a silent visual does not replay it")
     SameVisual(visual)
     Test.AdvanceAnimations(TOAST_SECONDS)
@@ -478,7 +459,7 @@ return function(Quiz)
     Same(#Test.soundCalls, soundCount + 3, "only the three audible events played once")
     Same(Test.soundHandles[foreignHandle], true, "all queue cleanup preserves unrelated audio")
 
-    UI:SaveSoundVolume(100)
+    SettingsPage:SaveSoundVolume(100)
     Test.soundDuration = TOAST_SECONDS + 2
     Toasts:Enqueue({ { name = "LongClip-TestRealm", streak = 5 }, { name = "NextLevel-TestRealm", streak = 6 } })
     Test.soundDuration = nil
@@ -486,7 +467,7 @@ return function(Quiz)
     Test.AdvanceAnimations(TOAST_SECONDS)
     visual = Visual()
     Check(Toasts.frame:GetScript("OnUpdate"), "long native playback keeps an active completion poll")
-    UI:SaveSoundVolume(40)
+    SettingsPage:SaveSoundVolume(40)
     SameVisual(visual)
     Same(Toasts.soundHandle, handle, "volume changes preserve a still-playing tail after its visual finishes")
     Same(Test.soundHandles[handle], true, "changing volume does not clip an overlong native voice")
@@ -503,7 +484,7 @@ return function(Quiz)
     Same(#Test.stoppedSounds, stopped, "no naturally finishing clip is stopped by the renderer")
     Same(Test.soundHandles[foreignHandle], true, "audio-tail handling also preserves unrelated sounds")
 
-    UI:SaveSoundVolume(0)
+    SettingsPage:SaveSoundVolume(0)
     local result = {
         hostName = "ResultHost-TestRealm",
         session = "volume.1",
@@ -516,7 +497,7 @@ return function(Quiz)
     Widget:RenderStreakToasts(result, true)
     Check(Toasts.active ~= nil, "a muted confirmed result still gets its visual announcement")
     local plays = Toasts.animation.playCalls
-    UI:SaveSoundVolume(100)
+    SettingsPage:SaveSoundVolume(100)
     Widget:RenderStreakToasts(result, true)
     Same(Toasts.animation.playCalls, plays, "unmuting cannot replay an already consumed result")
     Same(#Test.soundCalls, calls, "unmuting cannot add sound to an already consumed result")

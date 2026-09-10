@@ -1,0 +1,3 @@
+local _, Games = ...
+
+Games.Cards.TexasHoldem = Games.Cards.TexasHoldem or {}

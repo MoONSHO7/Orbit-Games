@@ -1,54 +1,54 @@
-# Orbit-Quiz
+# Orbit-Games
 
 ## Description
 
-A standalone World of Warcraft 12.1.0 quiz framework with a lean answer widget, discovered games, personal progress, and file-based question packs.
+A standalone World of Warcraft 12.1.0 multiplayer party-game framework. It bundles Quiz and an eight-seat Cards mode whose first variant is host-authoritative No-Limit Texas Hold'em.
 
 ## Purpose
 
-Authors define questions and rules; hosts select a quiz and press Start. Every player installs Orbit-Quiz, but only the host needs the selected packs. Orbit itself is not a dependency.
+Keep hosting, discovery, shared settings and persistence independent from any one game's rules. Every player installs Orbit-Games; only a Quiz host needs the selected question packs. Orbit itself is not a dependency.
 
-Install this folder as `World of Warcraft/_retail_/Interface/AddOns/Orbit-Quiz/`. Open `/oq` or `/orbitquiz` to host, join, change appearance, or position the widget. See the [quickstart](Docs/QUICKSTART.md) and [pack-authoring guide](Docs/PACKS.md).
+Install `Orbit-Games` under `World of Warcraft/_retail_/Interface/AddOns/`. Click the Orbit minimap icon or use `/og` or `/orbitgames`; right-click the icon for Settings and drag it to save its position. Commands, status and errors stay inside the addon UI rather than writing to the visible chat frame. See the [quickstart](Docs/QUICKSTART.md) and [Quiz pack guide](Docs/PACKS.md).
 
 ## Implementation
 
-The repository is organized by responsibility:
-
-    App/                  Startup, localized text, and runtime coordination
-    Game/                 Pack registry, rules, scoring, and quiz state
-    Network/              Identity, addon-message transport, sessions, discovery
-    Data/                 Saved settings, personal scores, historical archives
-    UI/                   Setup window, answer widget, streak toasts, controls, fonts
+    App/                  Startup, shared text and runtime coordination
+    Core/                 Generic game-type descriptor registry
+    Modes/Cards/          Card foundation, Texas Hold'em, private session projections and table UI
+    Modes/Quiz/           Quiz rules, packs, model, scores, session protocol and HUD
+    Network/              Shared identity, transport and game discovery
+    Data/                 OrbitGamesDB validation and legacy-save migration
+    UI/                   Shared setup shell, controls, media and minimap launcher
     Assets/               Bundled media
-    Packs/WarcraftLore/    Bundled questions, registration, and provenance
-    Dev/                  Source-only preview, tests, companion-addon example
-    Docs/                 Player and pack-author guides
-    Libs/                 Unmodified embedded SharedMedia dependencies
-    .github/workflows/    Validation, alpha tagging, and publishing
+    Dev/                  Source-only previews, tests and companion-addon example
+    Docs/                 Player and Quiz pack-author guides
+    Libs/                 Unmodified embedded media and minimap libraries
+    .github/workflows/    Validation, alpha tagging and publishing
 
-`Orbit-Quiz.toc` owns the framework's load order: libraries → namespace/text → rules/registry/content → scoring/storage/model → networking/UI → runtime. Source checkouts load the development preview last; packaged releases omit it. Third-party quiz addons load their files through their own TOCs. Addon-list branding uses the bundled `Assets/Orbit.png`, never an Orbit installation.
+`Orbit-Games.toc` is the load-order authority: libraries → shared namespace/text/registry → mode-owned domain and storage → shared network/UI → mode presentation and registration → runtime. Source checkouts load the development preview last; packaged releases omit it.
 
-`App/Runtime.lua` composes gameplay, networking, persistence and presentation. `Game/` owns author rules and host-observed outcomes; `Network/` carries validated questions/results; `Data/` retains confirmed personal progress. `UI/` renders these owners' state, including animated group streak announcements using bundled `Assets/Sounds` clips. Media changes notify the application through a callback rather than reaching into UI consumers.
+`App/Init.lua` exposes `OrbitGames`; `Core/GameTypes.lua` creates its game-type registry. Shared owners discover and route a selected game; `Modes/Quiz/` owns every question, answer, rule, score and Quiz session transformation. Quiz companion addons register through `OrbitGames.Quiz:RegisterPack` and declare `## Dependencies: Orbit-Games`.
 
-The public `OrbitQuiz:RegisterQuestionPack` API connects independently maintained quiz addons through their own `## Dependencies: Orbit-Quiz` TOCs. Authors use their own folders/repositories and releases; no core contribution or TOC edit is required. The [authoring guide](Docs/PACKS.md) includes complete starter files and the [copyable template](Dev/Examples/Orbit-Quiz-Pack-Example/README.md) is self-contained.
+`Data/Store.lua` owns `OrbitGamesDB`; mode-owned state lives below `modes`, including the preserved Quiz payload at `modes.quiz` and Cards setup/session results at `modes.cards`. Releases also package a small addon named `Orbit-Quiz` to load the former `OrbitQuizDB` SavedVariables file and satisfy older companion-addon dependencies while migration completes. It is a shim, not a second game engine.
 
-Warcraft Lore contains 1,183 game-based questions with four to six choices. Its source-only comic archive is excluded from play and releases. Each module's README records its data flow and maintenance constraints.
+Warcraft Lore contains 1,183 game-based questions with four to six choices. Its source-only comic archive is excluded from play and releases.
 
 ## Gotchas
 
-- All participants need protocol 8. Sessions support the host plus 16 remote players; realm/channel restrictions can prevent discovery or whispers across realms. There is no Battle.net relay.
-- Only host-confirmed closed results award points. This is trusted social play, not anti-cheat or latency-compensated competition; personal statistics are not verified rankings.
-- Question packs are trusted executable Lua, loaded through companion-addon TOCs. WoW cannot discover arbitrary JSON/YAML/text files; keep custom packs outside the core addon so updates do not overwrite them.
-- Store schema 6, personal-score schema 2, stable pack IDs, rule identities, and historical scoring are independent contracts. A folder cleanup must not migrate or rescore saved data.
-- Native rendering/network delivery and SavedVariables disk timing need in-game verification. Offline tests do not certify those boundaries.
-- After updating, use `/reload` and verify `/oq`, hosting/joining and appearance. The TOC remains the loading authority; old root-level Lua copies are no longer used.
+- All participants need the generic `ORBITGAMES1` / `ORBITGAMESDISC2` protocols and the selected activity version. Capacity belongs to the mode: Quiz allows 17 total players and Cards allows eight seats.
+- Cards clients receive only public state and their own hole cards until showdown, but the host owns the authoritative deck. Every Cards amount is a whole Gold value; whether a session represents real stakes is a private social agreement, and the addon never transfers, escrows or verifies gold.
+- Do not install the former full Orbit-Quiz addon beside Orbit-Games. The packaged `Orbit-Quiz` folder is only the migration/dependency shim.
+- Quiz pack IDs, question IDs, rules keys, scoring versions and receipt identities remain stable across the rename. Migration must never rescore or merge them.
+- `/og status` opens Games, `/og packs` opens Quiz Host, and `/og scores` or Cards `/og results` opens the mode's Results page. Archived Quiz league and 100-point standings remain preserved without a UI, command or chat projection.
+- Question packs are trusted executable Lua. Schema validation does not sandbox downloaded addons.
+- Native rendering, network delivery and SavedVariables disk timing still require in-game verification.
 
 ## Secrets
 
-Native identity and incoming communication are guarded before Lua operations. Chat lockdown suspends parsing/sending. Quiz deadlines and UI timing are addon-owned data; no protected unit-state arithmetic is required.
+Native identity and incoming communication are guarded before Lua operations. Chat lockdown suspends parsing and sending. Quiz deadlines and UI timing are addon-owned data; no protected unit-state arithmetic is required.
 
 ## References
 
-- [Application](App/README.md), [gameplay](Game/README.md), [networking](Network/README.md), [persistence](Data/README.md), and [UI](UI/README.md).
-- [Bundled packs](Packs/README.md), [development and tests](Dev/README.md), and [release workflows](.github/workflows/README.md).
-- [MIT licence](LICENSE) covers first-party code; [bundled libraries](Libs/README.md) retain their upstream licences.
+- [Application](App/README.md), [game-type contract](Modes/README.md), [Cards](Modes/Cards/README.md), [Quiz](Modes/Quiz/README.md), [networking](Network/README.md), [persistence](Data/README.md) and [UI](UI/README.md).
+- [Playing-card asset provenance and MIT licence](Assets/Cards/README.md).
+- [Development and tests](Dev/README.md), [release workflows](.github/workflows/README.md) and [MIT licence](LICENSE).

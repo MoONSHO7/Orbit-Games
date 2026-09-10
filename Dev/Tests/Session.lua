@@ -1,17 +1,18 @@
 local PACK_ID = "session-regression"
-local LEAGUE = "Protocol {Guild}"
 local HOST = "Remote-ForeignRealm"
 local OTHER_HOST = "Different-ForeignRealm"
 local PEER = "Participant-TestRealm"
 local SESSION_ID = "protocol-session.1"
 local EXPLANATION = "The private explanation appears only after the question closes."
-local PREFIX = "ORBITQUIZ8"
+local PREFIX = "ORBITGAMES1"
 local PACK_TITLE = "Session regression questions"
 local FRAGMENT_BYTES = 200
 
-return function(Quiz)
+return function(Games)
+    local Quiz = Games.Quiz
     local assertions, incomingId = 0, 0
-    local Session, Main, Comms = Quiz.Session, Quiz.Main, Quiz.Comms
+    local Session, Main, Comms = Quiz.Session, Games.Main, Games.Comms
+    local protocolVersion = tostring(Games.GameTypes:Get(Quiz.id).protocolVersion)
     local defaultRules = assert(Quiz.Rules.Normalize())
     local defaultRulesKey = assert(Quiz.Rules.Encode(defaultRules))
 
@@ -72,7 +73,11 @@ return function(Quiz)
     end
 
     local function Incoming(fields, sender, prefix, channel)
-        local pieces = { #fields .. ":" }
+        local pieces = {
+            (#fields + 2) .. ":",
+            #Quiz.id .. ":" .. Quiz.id,
+            #protocolVersion .. ":" .. protocolVersion,
+        }
         for _, field in ipairs(fields) do
             assert(type(field) == "string", "protocol fixtures contain only string fields")
             pieces[#pieces + 1] = #field .. ":" .. field
@@ -115,6 +120,10 @@ return function(Quiz)
             cursor = cursor + length
         end
         assert(cursor == #encoded + 1, "queued fields consume the complete message")
+        assert(fields[1] == Quiz.id, "queued transport envelope retains the Quiz game type")
+        assert(fields[2] == protocolVersion, "queued transport envelope retains the Quiz protocol version")
+        table.remove(fields, 1)
+        table.remove(fields, 1)
         return fields
     end
 
@@ -181,31 +190,30 @@ return function(Quiz)
         Same(#Test.errors, 0, "previous scenario did not raise a runtime error")
         Main:CancelTicker()
         Comms:Clear()
-        Main.game, Main.restrictionActive, Main.chatDisconnected, Main.restrictedUntil = nil, nil, nil, nil
-        Main.notice, Main.nextAutoAt = nil, nil
-        Main.autoPaused = false
+        Quiz.Controller.game, Main.restrictionActive, Main.chatDisconnected, Main.restrictedUntil = nil, nil, nil, nil
+        Quiz.Controller.notice, Quiz.Controller.nextAutoAt = nil, nil
+        Quiz.Controller.autoPaused = false
         Test.restricted = false
         Test.addonSendResult, Test.onAddonSend = nil, nil
         Test.now = math.floor(Test.now) + 100
         Test.addonSent, Test.sent = {}, {}
         Comms.suspended, Comms.tokens = false, nil
-        OrbitQuizDB = nil
-        Main:OnEvent("ADDON_LOADED", Quiz.addonName)
+        OrbitGamesDB = nil
+        Main:OnEvent("ADDON_LOADED", Games.addonName)
         Check(Main.initialized, "the real addon lifecycle initializes each scenario")
     end
 
     local function Settings()
         local settings = Quiz.Store:GetSettings()
-        settings.packId, settings.league = PACK_ID, LEAGUE
-        settings.duration = 20
+        settings.packId = PACK_ID
         return settings
     end
 
     local function Host()
         Fresh()
         Check(Main:Start(Settings()), "host starts the protocol fixture")
-        Same(Main.game.state, "open", "host without peers opens immediately")
-        return Main.game.round
+        Same(Quiz.Controller.game.state, "open", "host without peers opens immediately")
+        return Quiz.Controller.game.round
     end
 
     local function Peer(name, request)
@@ -221,8 +229,8 @@ return function(Quiz)
         return Session.client
     end
 
-    local function Welcome(client, score, league)
-        Incoming(Fields("W", client.request, SESSION_ID, league or LEAGUE, score or "70"), client.name)
+    local function Welcome(client, score)
+        Incoming(Fields("W", client.request, SESSION_ID, score or "70"), client.name)
         Same(client.session, SESSION_ID, "matching welcome establishes the host session")
         Same(Session.view.state, "waiting", "welcome waits for a question snapshot")
         Same(One("S", client.name)[2], SESSION_ID, "welcome requests a snapshot")
@@ -339,7 +347,7 @@ return function(Quiz)
     end
 
     Check(
-        Quiz:RegisterQuestionPack({
+        Quiz:RegisterPack({
             id = PACK_ID,
             title = "Session regression questions",
             questions = {
@@ -363,14 +371,13 @@ return function(Quiz)
     )
 
     local round = Host()
-    Same(Main.game.settings.duration, 15, "legacy host settings normalize to the fixed fifteen-second clock")
+    Same(Quiz.Controller.game.rules.answerSeconds, 15, "host protocol uses the selected pack clock")
     Same(round.deadline - round.startedAt, 15, "authoritative host model opens only a fifteen-second window")
     Same(Session.serverDeadline, GetServerTime() + 15, "host opening signal uses the fixed server deadline")
-    Main.game.settings.duration = 60
     local sessionId = Session.hostSession
     Incoming(Fields("J", "extra-guid", "Player-FORGED"), PEER)
     Same(next(Session.peers), nil, "join cannot introduce a payload GUID")
-    Incoming(Fields("J", "self-request"), Quiz.Identity.name)
+    Incoming(Fields("J", "self-request"), Games.Identity.name)
     Same(next(Session.peers), nil, "host cannot register itself as a remote peer")
     for _, token in ipairs({ "", "token with spaces", "token|markup", "token\n", string.rep("x", 65) }) do
         Incoming(Fields("J", token), PEER)
@@ -383,8 +390,7 @@ return function(Quiz)
     local welcome = One("W", PEER)
     Same(welcome[2], "peer-request.1", "welcome echoes only the request token")
     Same(welcome[3], sessionId, "welcome binds the host session")
-    Same(welcome[4], LEAGUE, "host sends a valid league name containing braces")
-    Same(welcome[5], "0.0", "host score carries an explicit decimal place")
+    Same(welcome[4], "0.0", "host score carries an explicit decimal place")
     Drain()
     Incoming(PeerFields("S", sessionId), PEER)
     local question = One("Q", PEER)
@@ -443,12 +449,15 @@ return function(Quiz)
     end
     Same(Comms.queueCount, 2, "snapshot replay preserves pending round traffic without restarting it")
     Same(#Queued("Q", PEER), 0, "ready peer does not need its question resent during snapshot replay")
-    Check(Comms:Send("Other-TestRealm", Fields("H", sessionId, "open", round.id, 0)), "another peer is not starved")
+    Check(
+        Comms:Send("Other-TestRealm", Quiz.id, Fields("H", sessionId, "open", round.id, 0)),
+        "another peer is not starved"
+    )
     Same(#Queued("H", "Other-TestRealm"), 1, "shared queue still accepts another participant's heartbeat")
     Test.now = round.deadline
     Comms:Clear()
-    Main:CloseQuestion(Test.now)
-    Same(Main.game.state, "results", "host finalizes the authoritative result")
+    Quiz.Controller:CloseQuestion(Test.now)
+    Same(Quiz.Controller.game.state, "results", "host finalizes the authoritative result")
     local result = One("R", PEER)
     Same(#result, 23, "result carries rules, streak accounting and compact group milestones")
     Same(result[4], tostring(round.correctIndex), "correct choice is first revealed in the result")
@@ -464,11 +473,10 @@ return function(Quiz)
     Same(tonumber(result[22]), 0, "older packs retain disabled streak bonuses")
     Same(result[18], PEER, "confirmed multiplayer result identifies the fastest correct native player")
     Same(tonumber(result[19]), accepted.elapsed, "confirmed winner time matches its accepted host timing")
-    Same(#Main.game.lastResult.answers, 1, "replayed answers are scored exactly once")
-    Same(Main.game.lastResult.duration, 15, "finalized wire-host history retains its actual fixed duration")
+    Same(#Quiz.Controller.game.lastResult.answers, 1, "replayed answers are scored exactly once")
+    Same(Quiz.Controller.game.lastResult.duration, 15, "finalized wire-host history retains its actual fixed duration")
     Check(accepted.points <= 2.5, "host scoring cannot inherit a larger legacy-window bonus")
-    Same(Main.game:GetStandings()[1].guid, peer.playerKey, "host session score retains native identity")
-    Same(#Quiz.Store:GetStandings(LEAGUE, "PUBLIC"), 0, "remote results never add to archived league totals")
+    Same(Quiz.Controller.game:GetStandings()[1].guid, peer.playerKey, "host session score retains native identity")
     for _ = 1, 300 do
         Incoming(PeerFields("D", sessionId, round.id), PEER)
         Incoming(PeerFields("A", sessionId, round.id, round.correctIndex, 2), PEER)
@@ -531,27 +539,33 @@ return function(Quiz)
     end
 
     local signedClient = Joining()
-    Welcome(signedClient, -2.5)
-    Same(Session.view.score, -2.5, "welcome accepts an existing negative league score")
+    Incoming(Fields("W", signedClient.request, SESSION_ID, -0.5), signedClient.name)
+    Same(signedClient.session, nil, "welcome rejects a syntactically valid negative total")
+    Welcome(signedClient, 0.5)
+    Same(Session.view.score, 0.5, "welcome accepts an existing nonnegative session score")
     Comms:Clear()
     Incoming(Question(101))
     Incoming(Fields("O", SESSION_ID, 101, GetServerTime() + 15))
-    Incoming(Fields("H", SESSION_ID, "open", 101, -2.8))
-    Same(Session.view.score, -2.8, "heartbeat snapshot can update a negative total")
-    Incoming(ResultFields(101, 1, 2, -0.7, -3.5, 0, 1, EXPLANATION, 6))
+    Incoming(Fields("H", SESSION_ID, "open", 101, -0.2))
+    Same(Session.view.score, 0.5, "heartbeat rejects a syntactically valid negative total")
+    Incoming(Fields("H", SESSION_ID, "open", 101, 0))
+    Same(Session.view.score, 0, "heartbeat accepts the zero score floor")
+    Incoming(ResultFields(101, 1, 2, -0.7, 0, 0, 1, EXPLANATION, 6))
     Same(Session.view.points, -0.7, "finalized result retains its signed fractional penalty")
-    Same(Session.view.score, -3.5, "finalized result retains its negative cumulative score")
+    Same(Session.view.score, 0, "finalized result retains its zero-floored cumulative score")
     Comms:Clear()
     Test.now = signedClient.lastHeard + 19
     Session:Tick(Test.now)
     Check(signedClient.awaitingWelcome, "lost host liveness initiates a fresh signed-score handshake")
-    Incoming(Fields("W", signedClient.request, SESSION_ID, LEAGUE, -3.5))
-    Same(Session.view.score, -3.5, "rejoin welcome preserves the negative score")
+    Incoming(Fields("W", signedClient.request, SESSION_ID, -0.7))
+    Check(signedClient.awaitingWelcome, "rejoin rejects a negative score snapshot")
+    Welcome(signedClient, 0)
+    Same(Session.view.score, 0, "rejoin welcome preserves the zero score floor")
     Incoming(Question(101))
-    Incoming(ResultFields(101, 1, 2, -0.7, -3.5, 0, 1, EXPLANATION, 6))
+    Incoming(ResultFields(101, 1, 2, -0.7, 0, 0, 1, EXPLANATION, 6))
     Same(Session.view.state, "results", "signed result snapshot restores the closed question after rejoin")
     Same(Session.view.points, -0.7, "snapshot recovery does not drop the wrong-answer penalty")
-    Same(Session.view.score, -3.5, "snapshot recovery does not reapply the same penalty")
+    Same(Session.view.score, 0, "snapshot recovery does not move the score below zero")
 
     round = Host()
     sessionId = Session.hostSession
@@ -637,12 +651,24 @@ return function(Quiz)
         Test.now = round.startedAt + 0.125
         Check(Session:SubmitAnswer(round.correctIndex), "host finalizes its local answer without public chat")
         Test.now = mode == "expired" and peer.lastSeen + 35 or round.deadline
-        Main:CloseQuestion(Test.now)
-        local expectedName = mode == "ready" and Quiz.Identity.name or nil
+        Quiz.Controller:CloseQuestion(Test.now)
+        local expectedName = mode == "ready" and Games.Identity.name or nil
         local expectedElapsed = mode == "ready" and 0.125 or nil
-        Same(Main.game.lastResult.fastestName, expectedName, mode .. " round applies actual-peer winner eligibility")
-        Same(Main:GetHostView().fastestName, expectedName, mode .. " host HUD uses the same finalized winner")
-        Same(Main.game.lastResult.fastestElapsed, expectedElapsed, mode .. " round retains only confirmed winner time")
+        Same(
+            Quiz.Controller.game.lastResult.fastestName,
+            expectedName,
+            mode .. " round applies actual-peer winner eligibility"
+        )
+        Same(
+            Quiz.Controller:GetHostView().fastestName,
+            expectedName,
+            mode .. " host HUD uses the same finalized winner"
+        )
+        Same(
+            Quiz.Controller.game.lastResult.fastestElapsed,
+            expectedElapsed,
+            mode .. " round retains only confirmed winner time"
+        )
         Same(Quiz.PersonalScores:GetPack(PACK_ID).answers, 1, mode .. " result always saves normal personal progress")
     end
 
@@ -651,12 +677,12 @@ return function(Quiz)
     peer = Peer()
     Incoming(PeerFields("D", sessionId, round.id), PEER)
     Test.now = round.deadline
-    Main:CloseQuestion(Test.now)
+    Quiz.Controller:CloseQuestion(Test.now)
     Incoming(Fields("F", sessionId, round.id, peer.request), PEER)
     Comms:Clear()
-    Check(Main:NextQuestion(), "host can prepare a subsequent question with registered peers")
-    local prepared = Main.game.round
-    Same(Main.game.state, "posting", "new question waits for current readiness")
+    Check(Quiz.Controller:NextQuestion(), "host can prepare a subsequent question with registered peers")
+    local prepared = Quiz.Controller.game.round
+    Same(Quiz.Controller.game.state, "posting", "new question waits for current readiness")
     Same(peer.readyId, nil, "new question resets the old readiness ID")
     Check(not Session:CanOpen(Test.now + 19.999), "unready peer is allowed the bounded preparation window")
     Check(Session:CanOpen(Test.now + 20), "preparation does not wait indefinitely for a peer")
@@ -665,9 +691,9 @@ return function(Quiz)
     Incoming(PeerFields("D", sessionId, prepared.id), PEER)
     Check(Session:CanOpen(Test.now), "current readiness permits immediate opening")
     Main:Tick()
-    Same(Main.game.state, "open", "ready question opens through the real runtime")
+    Same(Quiz.Controller.game.state, "open", "ready question opens through the real runtime")
     Check(Main:Pause(nil, false), "host pause voids the exposed question")
-    Same(Main.game.round, nil, "host pause discards active question state")
+    Same(Quiz.Controller.game.round, nil, "host pause discards active question state")
     Same(One("P", PEER)[3], tostring(prepared.id), "host pause carries its last exposed question ID")
     Comms:Clear()
     Test.now = Test.now + 5
@@ -687,21 +713,16 @@ return function(Quiz)
     local request = client.request
     Same(client.name, HOST, "foreign realm is preserved for the explicitly selected host")
     for _, fields in ipairs({
-        Fields("W", "wrong-request", SESSION_ID, LEAGUE, 70),
-        Fields("W", request, "", LEAGUE, 70),
-        Fields("W", request, "bad session", LEAGUE, 70),
-        Fields("W", request, string.rep("x", 65), LEAGUE, 70),
-        Fields("W", request, SESSION_ID, "", 70),
-        Fields("W", request, SESSION_ID, "   ", 70),
-        Fields("W", request, SESSION_ID, string.rep("x", 49), 70),
-        Fields("W", request, SESSION_ID, "Guild|markup", 70),
-        Fields("W", request, SESSION_ID, "Guild\n", 70),
-        Fields("W", request, SESSION_ID, LEAGUE),
-        Fields("W", request, SESSION_ID, LEAGUE, 70, "extra"),
+        Fields("W", "wrong-request", SESSION_ID, 70),
+        Fields("W", request, "", 70),
+        Fields("W", request, "bad session", 70),
+        Fields("W", request, string.rep("x", 65), 70),
+        Fields("W", request, SESSION_ID),
+        Fields("W", request, SESSION_ID, 70, "extra"),
     }) do
         Unchanged(fields, "malformed welcome")
     end
-    local validWelcome = Fields("W", request, SESSION_ID, LEAGUE, 70)
+    local validWelcome = Fields("W", request, SESSION_ID, 70)
     Unchanged(validWelcome, "other host's welcome", OTHER_HOST)
     Unchanged(validWelcome, "secret native identity", Test.secret)
     Unchanged(validWelcome, "malformed native identity", "Bad|Name-Realm")
@@ -724,11 +745,11 @@ return function(Quiz)
         "|cff123456100",
     }
     for _, value in ipairs(badIntegers) do
-        Unchanged(Changed(validWelcome, 5, value), "invalid welcome score")
+        Unchanged(Changed(validWelcome, 4, value), "invalid welcome score")
     end
     Welcome(client)
-    Same(Session.view.score, 70, "valid brace-containing league joins normally")
-    Unchanged(Fields("W", request, "replacement-session", LEAGUE, 70), "different-session welcome replay")
+    Same(Session.view.score, 70, "valid welcome joins normally")
+    Unchanged(Fields("W", request, "replacement-session", 70), "different-session welcome replay")
     Comms:Clear()
     Test.now = client.lastHeard + 19
     Session:Tick(Test.now)
@@ -749,7 +770,7 @@ return function(Quiz)
     Test.now = client.nextJoin
     Session:Tick(Test.now)
     Same(One("J", HOST)[2], recoveryRequest, "recovery retries reuse one stable fresh nonce")
-    Incoming(Fields("W", recoveryRequest, SESSION_ID, LEAGUE, 70))
+    Incoming(Fields("W", recoveryRequest, SESSION_ID, 70))
     Check(not client.awaitingWelcome, "fresh welcome completes membership recovery")
     Same(One("S", HOST)[2], SESSION_ID, "recovered handshake asks the host for current state")
 
@@ -837,7 +858,7 @@ return function(Quiz)
     Same(#Queued("A"), 0, "acknowledgement cancels obsolete answer retries")
     Incoming(Question(20))
     Incoming(Fields("O", SESSION_ID, 20, GetServerTime() + 15))
-    Incoming(Fields("W", client.request, SESSION_ID, LEAGUE, 999))
+    Incoming(Fields("W", client.request, SESSION_ID, 999))
     Check(not view.locked, "question, open and welcome replay cannot lock an open answer")
     Same(view.selected, 2, "replay preserves the acknowledged choice")
     Same(view.deadline, deadline, "replay cannot renew answer time")
@@ -882,7 +903,7 @@ return function(Quiz)
     Same(view.state, "results", "authoritative result resolves an unconfirmed answer")
     Same(view.selected, 2, "finalized result retains accepted selection")
     Same(view.points, 2.5, "finalized result carries per-question points")
-    Same(view.score, 73, "finalized result carries the league total")
+    Same(view.score, 73, "finalized result carries the session total")
     Same(view.notice, nil, "finalized result clears uncertainty")
     Unchanged(ReplyFields("E", SESSION_ID, 30, "not_open"), "late rejection after a finalized result")
     Unchanged(ReplyFields("K", SESSION_ID, 30, 4), "late acknowledgement after a finalized result")
@@ -1011,8 +1032,8 @@ return function(Quiz)
     Same(#Queued("S"), 0, "restriction recovery does not assume the host retained its peer")
     Same(client.lastHeard, Test.now, "restriction recovery starts a fresh liveness interval")
     Check(not Session:SubmitAnswer(1), "answers stay disabled until current host state arrives")
-    Unchanged(Fields("W", request, SESSION_ID, LEAGUE, 70), "old welcome after local restriction")
-    Incoming(Fields("W", recoveryRequest, SESSION_ID, LEAGUE, 70))
+    Unchanged(Fields("W", request, SESSION_ID, 70), "old welcome after local restriction")
+    Incoming(Fields("W", recoveryRequest, SESSION_ID, 70))
     Same(One("S", HOST)[2], SESSION_ID, "post-restriction welcome requests the current question")
     Incoming(Question(61))
     Incoming(Fields("O", SESSION_ID, 61, GetServerTime() + 15))
@@ -1033,7 +1054,7 @@ return function(Quiz)
     end
 
     client = Joining("選手-ForeignRealm")
-    Welcome(client, "2.5", "聯盟 {測試}")
+    Welcome(client, "2.5")
     Comms:Clear()
     Incoming(
         Fields(
@@ -1205,9 +1226,10 @@ return function(Quiz)
     for _, correctPoints in ipairs({ "-1", "-0.5", "0", "0.9", "2.6" }) do
         Unchanged(Changed(Result(70), 6, correctPoints), "correct result cannot use a penalty or exceed its bonus cap")
     end
-    Incoming(ResultFields(70, 1, 2, -0.5, -0.5, 0, 1, "", 14))
+    Unchanged(ResultFields(70, 1, 2, -0.5, -0.5, 0, 1, "", 14), "negative cumulative total is rejected")
+    Incoming(ResultFields(70, 1, 2, -0.5, 0, 0, 1, "", 14))
     Same(view.points, -0.5, "late wrong answer receives the minimum half-point penalty")
-    Same(view.score, -0.5, "negative half-point total is valid protocol data")
+    Same(view.score, 0, "late wrong answer retains the zero cumulative floor")
     client, view = Client(71)
     Incoming(ResultFields(71, 1, "", "", 70, 0, 0, ""))
     Same(view.state, "results", "unanswered result is valid")
@@ -1295,15 +1317,15 @@ return function(Quiz)
     end
     Unchanged(Changed(winnerResult, 19, string.rep("0", 33)), "winner timestamp has a bounded representation")
     Unchanged(
-        Changed(winnerResult, 18, Quiz.Identity.name),
+        Changed(winnerResult, 18, Games.Identity.name),
         "self-announced winner must match the local final timestamp"
     )
     Unchanged(
-        ResultFields(190, 1, 2, -1, 69, 1, 2, "", 0, 4, Quiz.Identity.name, 0),
+        ResultFields(190, 1, 2, -1, 69, 1, 2, "", 0, 4, Games.Identity.name, 0),
         "local wrong answer cannot also be the announced correct winner"
     )
     Unchanged(
-        ResultFields(190, 1, "", "", 70, 1, 1, "", nil, 4, Quiz.Identity.name, 0),
+        ResultFields(190, 1, "", "", 70, 1, 1, "", nil, 4, Games.Identity.name, 0),
         "unanswered local player cannot be the announced winner"
     )
     Unchanged(ResultFields(190, 1, 2, -1, 69, 0, 2, "", 0, 4, PEER, 0), "a zero-correct round cannot name a winner")
@@ -1326,8 +1348,8 @@ return function(Quiz)
         local id = 190 + index
         Incoming(Question(id))
         local points = Quiz.Scoring.Calculate(true, elapsed, 15)
-        Incoming(ResultFields(id, 2, 2, points, points, 1, 2, "", elapsed, 4, Quiz.Identity.name, elapsed))
-        Same(Session.view.fastestName, Quiz.Identity.name, "self winner is valid when final choice and timing match")
+        Incoming(ResultFields(id, 2, 2, points, points, 1, 2, "", elapsed, 4, Games.Identity.name, elapsed))
+        Same(Session.view.fastestName, Games.Identity.name, "self winner is valid when final choice and timing match")
         Same(Session.view.fastestElapsed, elapsed, "winner timing retains full host precision at accepted boundaries")
     end
 
@@ -1393,7 +1415,7 @@ return function(Quiz)
     )
     Same(Quiz.PersonalScores:GetPack(PACK_ID).answers, 2, "painting a cached receipt does not re-award points")
 
-    Check(Quiz.Store:Initialize(OrbitQuizDB), "received personal receipts survive SavedVariables validation")
+    Check(Quiz.Store:Initialize(OrbitGamesDB.modes.quiz), "received personal receipts survive Quiz subtree validation")
     local savedAnswers = Quiz.PersonalScores:GetPack(PACK_ID).answers
     Check(Session:Leave(), "explicit leave discards participant-only result caches")
     Check(Session:JoinHost(HOST), "fresh membership reconnects to the same ongoing host")
@@ -1432,7 +1454,7 @@ return function(Quiz)
     peer = Peer()
     Incoming(PeerFields("D", sessionId, round.id), PEER)
     Test.now = round.deadline
-    Main:CloseQuestion(Test.now)
+    Quiz.Controller:CloseQuestion(Test.now)
     Same(Session.resultCount, 1, "host retains an unanswered receipt until its participant persists it")
     Session:CancelRoundMessages()
     Same(#Queued("R", PEER), 1, "result receipt transport survives ordinary question-message cancellation")
@@ -1463,7 +1485,7 @@ return function(Quiz)
 
     round = Host()
     Test.now = round.deadline
-    Main:CloseQuestion(Test.now)
+    Quiz.Controller:CloseQuestion(Test.now)
     local function ReceiptPeer(index)
         local name = "Recipient"
             .. string.char(65 + index % 26)
@@ -1481,7 +1503,7 @@ return function(Quiz)
     for playerIndex = 100, 115 do
         for resultIndex = 1, 17 do
             Test.now = Test.now + 0.01
-            Main.game.lastResult.id = round.id + resultIndex
+            Quiz.Controller.game.lastResult.id = round.id + resultIndex
             Session:SendResult(ReceiptPeer(playerIndex))
             Check(Session.resultCount <= 256, "global receipt count cannot exceed its memory budget")
             Check(
@@ -1630,7 +1652,7 @@ return function(Quiz)
 
     do
         client, view = Client(1800)
-        local ownName = Quiz.Identity.name
+        local ownName = Games.Identity.name
         local function Name(id, name, request)
             return Fields("N", SESSION_ID, request or client.request, id, name)
         end
@@ -1736,9 +1758,9 @@ return function(Quiz)
         Test.now = Test.now + 1
         Session:SetRestricted(false)
         local previousRequest = client.request
-        Incoming(Fields("W", previousRequest, SESSION_ID, LEAGUE, "72.5"))
+        Incoming(Fields("W", previousRequest, SESSION_ID, "72.5"))
         Incoming(Question(1810))
-        Incoming(Fields("N", SESSION_ID, previousRequest, 1, Quiz.Identity.name))
+        Incoming(Fields("N", SESSION_ID, previousRequest, 1, Games.Identity.name))
         Same(
             Session.view.suppressStreakToasts,
             true,
@@ -1781,7 +1803,7 @@ return function(Quiz)
         Incoming(Fields("B", Session.hostSession, peer.request, nameFields[4]), PEER)
         Same(peer.streakAcknowledged[firstSpeakerId], true, "the current peer acknowledges its received identity map")
         Comms:Clear()
-        Check(Comms:Send(PEER, { "T", "busy", "busy" }), "a gameplay packet occupies the outbox")
+        Check(Comms:Send(PEER, Quiz.id, { "T", "busy", "busy" }), "a gameplay packet occupies the outbox")
         Session:Tick(Test.now + 1)
         Same(#Queued("N", PEER), 0, "name prefetch cannot add traffic ahead of queued gameplay")
         Comms:Clear()
@@ -1795,13 +1817,113 @@ return function(Quiz)
         Check(Session.streakSpeakers.count <= 64, "host identity-cache rotation does not grow with session churn")
         Check(Session.streakSpeakers.sequence > 100, "rotating a dictionary never reuses an old speaker ID")
         Check(
-            Session.streakSpeakers.byName[Quiz.Identity.name:lower()],
+            Session.streakSpeakers.byName[Games.Identity.name:lower()],
             "dictionary rotation retains the host identity"
         )
         Check(
             Session.streakSpeakers.byName[PEER:lower()],
             "dictionary rotation retains every active participant identity"
         )
+    end
+
+    do
+        client, view = Client(2200)
+        local rows, revision = Session:GetStandings()
+        Same(rows, nil, "participant standings stay unloaded before the score is hovered")
+        Same(revision, 0, "an unloaded participant projection has no invented revision")
+        Check(Session:SetStandingsVisible(true), "score hover activates demand-driven standings sync")
+        Session:Tick(Test.now)
+        local request = One("G", HOST)
+        Same(#request, 3, "standings request keeps one compact membership-fenced shape")
+        Same(request[2], SESSION_ID, "standings request identifies the joined session")
+        Same(request[3], client.request, "standings request identifies the current membership epoch")
+        local function StandingsView(id, encoding, membership, session)
+            return Fields("V", session or SESSION_ID, membership or client.request, id, encoding)
+        end
+        local validEncoding = HOST .. "=7.5," .. Games.Identity.name .. "=2.5"
+        for _, fields in ipairs({
+            StandingsView(2200, validEncoding, "old-request.1"),
+            StandingsView(2200, validEncoding, nil, "different-session"),
+            StandingsView("", validEncoding),
+            StandingsView("01", validEncoding),
+            StandingsView(2200, HOST .. "=-1.0"),
+            StandingsView(2200, HOST .. "=7"),
+            StandingsView(2200, HOST .. "=7.50"),
+            StandingsView(2200, "Shortname=7.5"),
+            StandingsView(2200, HOST .. "=7.5," .. HOST:lower() .. "=2.5"),
+            StandingsView(2200, Games.Identity.name .. "=2.5," .. HOST .. "=7.5"),
+            StandingsView(2200, HOST .. "=7.5,"),
+        }) do
+            Incoming(fields)
+            Same(Session:GetStandings(), nil, "malformed standings never partially install a projection")
+        end
+        Incoming(StandingsView(2200, validEncoding))
+        rows, revision = Session:GetStandings()
+        Same(revision, 2200, "valid standings install their authoritative result revision")
+        Same(#rows, 2, "valid standings install every projected row")
+        Same(rows[1].name, HOST, "standings preserve authoritative rank order")
+        Same(rows[1].score, 7.5, "standings preserve exact nonnegative tenths")
+        Same(rows[2].name, Games.Identity.name, "the local player remains an ordinary ranked row")
+        local acceptedRows = rows
+        Incoming(StandingsView(2200, validEncoding))
+        Same(Session:GetStandings(), acceptedRows, "an identical standings retry is a pointer-stable no-op")
+        Incoming(StandingsView(2200, HOST .. "=8.0," .. Games.Identity.name .. "=2.5"))
+        Same(Session:GetStandings(), acceptedRows, "a conflicting equal revision cannot replace standings")
+        Incoming(StandingsView(2199, HOST .. "=9.0"))
+        Same(Session:GetStandings(), acceptedRows, "a stale absolute snapshot cannot roll standings back")
+        Incoming(StandingsView(2201, Games.Identity.name .. "=3.0," .. HOST .. "=0.0"))
+        rows, revision = Session:GetStandings()
+        Check(rows ~= acceptedRows, "a newer valid revision atomically replaces the detached rows")
+        Same(revision, 2201, "the replacement advances the monotonic revision")
+        Same(rows[1].score, 3, "replacement scores are absolute rather than additive deltas")
+        Same(view.score, 70, "standings presentation never changes the separately reported player score")
+        Same(client.answerRevision, 0, "standings presentation never creates an answer action")
+
+        local hundred, hundredAndOne = {}, {}
+        for index = 1, 101 do
+            local first = string.char(65 + math.floor((index - 1) / 26))
+            local second = string.char(65 + (index - 1) % 26)
+            local entry = "Rank" .. first .. second .. "-Realm=" .. string.format("%.1f", 102 - index)
+            if index <= 100 then
+                hundred[#hundred + 1] = entry
+            end
+            hundredAndOne[#hundredAndOne + 1] = entry
+        end
+        Incoming(StandingsView(2202, table.concat(hundred, ",")))
+        rows, revision = Session:GetStandings()
+        Same(#rows, 100, "the demand-driven projection accepts the requested top one hundred")
+        Same(revision, 2202, "the top-one-hundred projection advances once")
+        local topRows = rows
+        Incoming(StandingsView(2203, table.concat(hundredAndOne, ",")))
+        Same(Session:GetStandings(), topRows, "a one-hundred-and-first row is rejected atomically")
+        Same(Session:SetStandingsVisible(false), true, "leaving the score closes demand-driven synchronization")
+        Check(not Comms:IsTagBusy("quiz-standings-request"), "closing the score cancels its pending request")
+
+        local round = Host()
+        local game = Quiz.Controller.game
+        game.players = {
+            first = { name = "Alpha-TestRealm", score = 9, correct = 2, incorrect = 0, answers = 2 },
+            second = { name = "Beta-TestRealm", score = 4.5, correct = 1, incorrect = 1, answers = 2 },
+        }
+        game.lastResult = { id = round.id }
+        local hostRows, hostRevision = Session:GetStandings()
+        Same(#hostRows, 2, "the host reads its authoritative standings without network traffic")
+        Same(hostRevision, round.id, "the host projection uses the finalized result identity")
+        Same(Session:GetStandings(), hostRows, "unchanged host standings reuse one detached projection")
+        local peer = Peer()
+        Comms:Clear()
+        Incoming(Fields("G", Session.hostSession, "wrong-request.1"), PEER)
+        Same(#Queued("V", PEER), 0, "an old membership cannot request current standings")
+        Incoming(Fields("G", Session.hostSession, peer.request), PEER)
+        local response = One("V", PEER)
+        Same(#response, 5, "the host returns one bounded absolute standings view")
+        Same(response[3], peer.request, "the response is fenced to the requesting membership")
+        Same(response[4], tostring(round.id), "the response carries the authoritative monotonic revision")
+        Same(response[5], "Alpha-TestRealm=9.0,Beta-TestRealm=4.5", "the host sends canonical ranked rows")
+        Incoming(Fields("G", Session.hostSession, peer.request), PEER)
+        Same(#Queued("V", PEER), 1, "retries cannot duplicate an already queued standings response")
+        Same(#game:GetStandings(), 2, "standings requests never add or remove model players")
+        Same(game.players.first.answers + game.players.second.answers, 4, "standings requests never record answers")
     end
 
     client, view = Client(80)

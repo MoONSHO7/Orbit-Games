@@ -2,32 +2,33 @@
 
 ## Description
 
-Saved setup/appearance, account-wide personal quiz progress, and preserved historical league archives.
+Orbit-Games account state, shared preferences and isolated per-game-type data.
 
 ## Purpose
 
-Keep authoritative receipt accounting and save migrations separate from gameplay, networking and presentation.
+Keep root save validation and one-time product migration separate from mode-owned accounting and presentation.
 
 ## Implementation
 
-`Store.lua` owns top-level `OrbitQuizDB` schema 6, setup normalization, independent widget settings/position and sound volume, persistent question counters and historical league readers. Runtime binds the restored database during the addon's `ADDON_LOADED` event.
+`Store.lua` owns `OrbitGamesDB`. The selected mode, nonempty Host-to audience selection and minimap preferences live at the root; game-owned data lives under `modes[modeId]`. Host audiences normalize to detached `server`, `guild` and `party` booleans before every registered storage owner validates its mode data without side effects. The store binds data only after the entire root validates. The schema-7 Quiz payload is `modes.quiz`; Cards setup, table placement, counters and bounded session results live at `modes.cards`.
 
-`PersonalScores.lua` owns its own subtree: schema 1→2 migration preserves original scoring-version-2 records while current receipts accumulate by stable pack ID and canonical rules key. Compressed host/session/round identity ranges prevent duplicate credit, including delayed older receipts.
+The packaged addon named `Orbit-Quiz` exists only so WoW loads the former addon-named SavedVariables file. Orbit-Games validates `OrbitQuizDB`, copies its Quiz payload into `OrbitGamesDB.modes.quiz` once, and never rescales, merges or guesses historical rules.
 
-`GetScoreRows` projects detached original/ruleset rows directly from canonical saved stats for the UI. Compatibility `GetPack`/`GetPacks` summaries remain available, but mixed-rule totals are not comparable rankings. The host's current-game standings live in the model and start afresh.
+`Modes/Quiz/Data/PersonalScores.lua` validates Quiz receipts, keeps signed per-pack accounting and projects detached score rows whose totals floor at zero. Compressed host/session/round ranges continue to prevent duplicate credit across reloads and delayed results.
+
+`Modes/Cards/Data/Store.lua` validates whole-Gold settings, local table appearance and completed-session results. Schema 4 adds the bounded SharedMedia font key; its schema-1/2 migration still removes legacy currency/funded/paid fields and retains their raw integer amounts as the new whole-Gold unit, while schema 3 gains the font default without relaxing malformed host data. `Ledger.lua` accounts only for buy-ins, rebuys, final balances and net results; it never accesses WoW money or trade state.
 
 ## Gotchas
 
-- Only confirmed closed results affect personal scores. WoW flushes SavedVariables on normal logout/reload; crashes can lose progress. Local characters share totals, not other computers/accounts.
-- A content-version update retains a pack/ruleset row; changed resolved rules create a separate row even if the author reuses a revision. Never rescore historical totals or infer personal pack totals from old league archives.
-- Invalid, unsupported or capacity-limited saved data must fail without silently resetting it. Existing legacy arithmetic and read migrations remain frozen.
-- Duplicate tracking spans pack/rules combinations within each host/session. Persist the identity alongside credit; do not clear ranges merely because a question left the visible recent history.
-- Returned summaries/rules are detached. UI changes must not mutate canonical saved stats; sorting is case-insensitive title, pack ID, then Original rules before canonical rule keys.
-- Widget placement, appearance and sound volume save independently from host setup and each other. Missing volume defaults to the original loudness without a schema change; malformed values fail atomically. Reflow alone must not rewrite normalized anchors.
-- Retired chat settings/passwords are discarded during normalization. Archived public/whisper data and the internal `PUBLIC` bucket remain storage compatibility contracts, not playable chat modes.
-- Retain archive readers, validation, and legacy fixture-writing behavior during structural cleanup. No schema or global SavedVariables name changes accompany the new folders.
+- A physical addon rename changes WoW's SavedVariables filename; declaring the old global in the new TOC is not a migration.
+- Treat the legacy save as input until the new root and Quiz subtree both validate. A failed import must leave both untouched and retry safely.
+- Keep pack IDs, rules keys, scoring versions, receipt identities and archive arithmetic byte-for-byte compatible.
+- Only confirmed closed Quiz results affect personal scores. WoW writes on normal logout/reload; crashes can lose recent progress.
+- The saved signed Quiz balance may be negative so wrong guesses at zero still offset later gains; public pack summaries and score rows never expose less than zero.
+- Shared preferences and mode data must not replace one another during a partial save.
+- Older roots without Host-to data default to all three audiences. Malformed or empty selections reject atomically rather than producing an undiscoverable host.
+- The live minimap table is retained by LibDBIcon; do not copy or replace it after registration.
 
 ## References
 
-- [Gameplay and scoring](../Game/README.md), [receipt transport](../Network/README.md), [appearance](../UI/README.md).
-- [Persistence and upgrade regressions](../Dev/Tests/README.md); workspace skill `orbit-settings` for shared principles (Orbit-Quiz owns its independent database).
+- [Cards accounting](../Modes/Cards/README.md), [Quiz accounting](../Modes/Quiz/README.md), [network transport](../Network/README.md), [shared UI](../UI/README.md) and [regressions](../Dev/Tests/README.md).

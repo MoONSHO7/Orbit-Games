@@ -1,8 +1,0 @@
-## Interface: 120100
-## Title: Orbit-Quiz: Example Pack
-## Notes: Independent quiz addon template. Requires Orbit-Quiz; customize and distribute separately.
-## Author: Your name
-## Version: 1.0
-## Dependencies: Orbit-Quiz
-
-Questions.lua

@@ -20,10 +20,12 @@ local GEOMETRY_CALLS = {
 }
 local DISPLAYS = { { 1920, 1080, 0.71 }, { 1601, 901, 0.83 }, { 800, 600, 1.25 } }
 
-return function(Quiz)
+return function(Games)
+    local Quiz = Games.Quiz
     local assertions, nextId = 0, 0
     local protocolSession = SESSION
-    local Widget, SessionUI, UI = Quiz.Widget, Quiz.Session, Quiz.UI
+    local Widget, SessionUI, UI = Quiz.Widget, Quiz.Session, Games.UI
+    local SettingsPage = Quiz.SettingsPage
     local defaultRulesKey = Quiz.Rules.Encode(Quiz.Rules.Normalize())
     local function Check(value, message)
         assertions = assertions + 1
@@ -46,7 +48,7 @@ return function(Quiz)
         end
     end
     local function Labels()
-        local labels = { Widget.packText, Widget.prompt, Widget.scoreText, Widget.winnerText }
+        local labels = { Widget.packText, Widget.prompt, Widget.scoreValueText, Widget.scoreText, Widget.winnerText }
         for _, choice in ipairs(Widget.choices) do
             labels[#labels + 1] = choice.Text
         end
@@ -61,6 +63,8 @@ return function(Quiz)
             Widget.questionContent,
             Widget.packText,
             Widget.prompt,
+            Widget.scoreRegion,
+            Widget.scoreValueText,
             Widget.scoreText,
             Widget.winnerText,
             Widget.timer,
@@ -130,7 +134,7 @@ return function(Quiz)
         Same(Widget.winnerAnimation:IsPlaying(), false, message .. " has no running native animation")
     end
     local function Begin(count, long, rules)
-        Quiz.Comms:Clear()
+        Games.Comms:Clear()
         nextId = nextId + 1
         rules = rules or Quiz.Rules.Normalize()
         local rulesKey = Quiz.Rules.Encode(rules)
@@ -138,8 +142,8 @@ return function(Quiz)
             Check(SessionUI:Leave(), "switching rule fixtures leaves the previous authority")
             protocolSession = SESSION .. ".rules." .. nextId
             Check(SessionUI:JoinHost(HOST, protocolSession), "different rules start a new advertised game")
-            SessionUI:Receive(HOST, { "W", SessionUI.client.request, protocolSession, "HUD polish", "0.0" })
-            Quiz.Main:CancelTicker()
+            SessionUI:Receive(HOST, { "W", SessionUI.client.request, protocolSession, "0.0" })
+            Games.Main:CancelTicker()
         end
         local choices = {}
         for index = 1, count or 4 do
@@ -230,12 +234,14 @@ return function(Quiz)
         Same(Widget.prompt:GetFontObject(), Widget.fontObjects.question, "question uses its owned font object")
         Same(Widget.packText:GetFontObject(), Widget.fontObjects.pack, "pack label uses its owned font object")
         Same(Widget.winnerText:GetFontObject(), Widget.fontObjects.winner, "winner uses its owned font object")
+        Same(Widget.scoreValueText:GetFontObject(), Widget.fontObjects.answer, "permanent score uses the answer font")
+        Same(Widget.scoreText:GetFontObject(), Widget.fontObjects.answer, "score delta uses the answer font")
         for _, label in ipairs(Labels()) do
             Same(label.fontCalls, nil, "visible HUD text never receives an inline font file")
             local font = label:GetFontObject()
             Check(font ~= GameFontHighlight, "HUD text is not mutating a shared Blizzard font")
             local x, y = label:GetShadowOffset()
-            Near(x / Pixel(label), -2, "rendered shadows retain a two-physical-pixel left offset")
+            Near(x / Pixel(label), 2, "rendered shadows retain a two-physical-pixel right offset")
             Near(y / Pixel(label), -2, "rendered shadows retain a two-physical-pixel down offset")
             local fontX, fontY = font:GetShadowOffset()
             Near(fontX, x, "owned font object carries the same horizontal shadow")
@@ -244,6 +250,7 @@ return function(Quiz)
         end
     end
     local function Geometry()
+        local timerFillPixels, timerTrackPixels, timerFillOverhangPixels = 4, 2, 1
         TextRoles()
         local pixel = Pixel(Widget.prompt)
         Same(Widget.packText:GetText(), SessionUI.view.packTitle, "small heading shows the actual question pack")
@@ -258,20 +265,35 @@ return function(Quiz)
         end
         Near(
             (Widget.prompt:GetLeft() - Widget.questionContent:GetLeft()) / pixel,
-            2,
-            "scroll body reserves the leftward text shadow"
+            0,
+            "scroll body starts text at the left edge"
         )
         Near(
             (Widget.questionContent:GetRight() - Widget.prompt:GetRight()) / pixel,
-            1,
-            "scroll body reserves rightward pressed text"
+            3,
+            "scroll body reserves the rightward shadow and pressed text"
         )
         Near(
-            (Widget.prompt:GetBottom() - Widget.timer:GetTop()) / pixel,
+            (Widget.prompt:GetBottom() - Widget.timer.Track:GetTop()) / pixel,
             2,
-            "larger wrapped question keeps the close two-pixel timer gap"
+            "larger wrapped question keeps the close two-pixel backdrop gap"
         )
-        Near(Widget.timer:GetHeight() / pixel, 2, "timer remains two physical pixels at every scale")
+        Near(Widget.timer:GetHeight() / pixel, timerFillPixels, "timer fill remains four pixels at every scale")
+        Near(
+            Widget.timer.Track:GetHeight() / pixel,
+            timerTrackPixels,
+            "timer backdrop remains two pixels at every scale"
+        )
+        Near(
+            (Widget.timer:GetTop() - Widget.timer.Track:GetTop()) / pixel,
+            timerFillOverhangPixels,
+            "timer fill stays one pixel above the backdrop"
+        )
+        Near(
+            (Widget.timer.Track:GetBottom() - Widget.timer:GetBottom()) / pixel,
+            timerFillOverhangPixels,
+            "timer fill stays one pixel below the backdrop"
+        )
         local last = Widget.choices[#SessionUI.view.choices]
         Near(
             (last:GetBottom() - Widget.questionContent:GetBottom()) / pixel,
@@ -296,6 +318,15 @@ return function(Quiz)
             "winner footer remains inside the content's horizontal edges"
         )
         Same(Widget.winnerText:GetParent(), Widget.content, "winner text is not a scroll child")
+        Same(Widget.scoreRegion:GetParent(), Widget.content, "permanent score region is not a scroll child")
+        Same(Widget.scoreValueText:GetParent(), Widget.scoreRegion, "permanent total belongs to the score region")
+        Same(Widget.scoreText:GetParent(), Widget.scoreRegion, "animated delta overlays the same score region")
+        Near(Widget.scoreValueText:GetRight(), Widget.scoreRegion:GetRight(), "permanent total is right pinned")
+        Near(Widget.scoreText:GetRight(), Widget.scoreRegion:GetRight(), "animated delta shares the right edge")
+        Check(
+            Widget.questionScroll:GetRight() < Widget.scoreRegion:GetLeft(),
+            "question scrolling remains outside the permanent score region"
+        )
         local left, bottom, width, height = Widget.content:GetScaledRect()
         local screenLeft, screenBottom, screenWidth, screenHeight = UIParent:GetScaledRect()
         Check(
@@ -304,7 +335,16 @@ return function(Quiz)
         )
         Check(left + width <= screenLeft + screenWidth + EPSILON, "HUD remains inside right screen edge")
         Check(bottom + height <= screenBottom + screenHeight + EPSILON, "HUD remains inside upper screen edge")
-        for _, region in ipairs({ Widget.content, Widget.packText, Widget.prompt, Widget.timer, Widget.winnerText }) do
+        for _, region in ipairs({
+            Widget.content,
+            Widget.packText,
+            Widget.prompt,
+            Widget.timer,
+            Widget.scoreRegion,
+            Widget.scoreValueText,
+            Widget.scoreText,
+            Widget.winnerText,
+        }) do
             Grid(region)
         end
     end
@@ -358,8 +398,8 @@ return function(Quiz)
     UI:Toggle()
     local nativePath, nativeHeight, nativeFlags = GameFontHighlight:GetFont()
     Check(SessionUI:JoinHost(HOST), "HUD polish fixture joins one remote host")
-    SessionUI:Receive(HOST, { "W", SessionUI.client.request, SESSION, "HUD polish", "0.0" })
-    Quiz.Main:CancelTicker()
+    SessionUI:Receive(HOST, { "W", SessionUI.client.request, SESSION, "0.0" })
+    Games.Main:CancelTicker()
     local view = Begin(6, true)
     HiddenWinner("open questions never reveal a winner")
     Geometry()
@@ -392,17 +432,17 @@ return function(Quiz)
         choice:Enable()
     end
     Down(choice)
-    Widget:StartDrag()
+    Widget.dragHandle:GetScript("OnDragStart")(Widget.dragHandle)
     Released(choice, "starting edit-mode movement clears pressed text")
     Same(Widget.dragging, true, "question widget enters native movement")
-    Widget:StopDrag()
+    Widget.dragHandle:GetScript("OnDragStop")(Widget.dragHandle)
     Test.now = Test.now + 0.3
     Down(choice)
     Widget.frame:Hide()
     Released(choice, "hiding the whole HUD clears pressed text")
     Widget:Refresh()
     Down(choice)
-    UI:SaveWidgetSettings({ scale = 105 })
+    SettingsPage:SaveWidgetSettings({ scale = 105 })
     Released(choice, "live scale changes clear the old pixel-offset press")
     Down(choice)
     Widget:OnDisplayChanged()
@@ -463,7 +503,7 @@ return function(Quiz)
         elseif stop == "display" then
             Widget:OnDisplayChanged()
         elseif stop == "scale" then
-            UI:SaveWidgetSettings({ scale = Widget.frame:GetScale() == 1 and 105 or 100 })
+            SettingsPage:SaveWidgetSettings({ scale = Widget.frame:GetScale() == 1 and 105 or 100 })
         elseif stop == "hide" then
             Widget.frame:Hide()
         else
@@ -481,7 +521,7 @@ return function(Quiz)
     Widget:Refresh()
     Check(SessionUI:Leave(), "winner fixture explicitly leaves before reconnecting")
     Check(SessionUI:JoinHost(HOST), "winner fixture reconnects with fresh presentation caches")
-    SessionUI:Receive(HOST, { "W", SessionUI.client.request, SESSION, "HUD polish", "2.0" })
+    SessionUI:Receive(HOST, { "W", SessionUI.client.request, SESSION, "2.0" })
     local restored = {
         "Q",
         SESSION,
@@ -507,10 +547,10 @@ return function(Quiz)
     Widget:Refresh()
     Same(SessionUI.view.suppressWinnerPopup, true, "durable already-scored result suppresses first-paint winner replay")
     HiddenWinner("fresh membership cannot replay a previously recorded winner")
-    Quiz.Main:CancelTicker()
+    Games.Main:CancelTicker()
 
     for percent = 50, 200, 5 do
-        UI:SaveWidgetSettings({ scale = percent })
+        SettingsPage:SaveWidgetSettings({ scale = percent })
         for _, display in ipairs(DISPLAYS) do
             Display(display)
             view = Begin(6, true)
@@ -530,7 +570,7 @@ return function(Quiz)
             end
         end
     end
-    UI:SaveWidgetSettings({ scale = 200 })
+    SettingsPage:SaveWidgetSettings({ scale = 200 })
     Display({ 800, 600, 1.25 })
     view = Begin(6, true)
     Geometry()
@@ -553,35 +593,48 @@ return function(Quiz)
             streakBonusMax = 100,
         })
         local function FitsScore(points)
-            local label = Widget.scoreText
-            local text = Quiz.L.W_SCORE_DELTA_F:format(points)
-            local previousText, previousCalls = label:GetText(), label.textCalls
-            local width = label:GetUnboundedStringWidthForText(text)
-            Check(
-                label:GetWidth() + EPSILON >= width + 2 * Pixel(label),
-                "reserved score column fits the signed reward and its shadow: " .. text
+            local region = Widget.scoreRegion
+            local samples = {
+                { Widget.scoreText, Quiz.L.W_SCORE_DELTA_F:format(points), "signed delta" },
+                { Widget.scoreValueText, Quiz.L.W_SCORE_TOTAL_F:format(math.max(0, points)), "cumulative total" },
+            }
+            for _, sample in ipairs(samples) do
+                local label, text, role = unpack(sample)
+                local previousText, previousCalls = label:GetText(), label.textCalls
+                local width = label:GetUnboundedStringWidthForText(text)
+                Check(
+                    region:GetWidth() + EPSILON >= width + 2 * Pixel(label),
+                    "reserved score region fits the " .. role .. " and its shadow: " .. text
+                )
+                Same(label:GetText(), previousText, "measurement never writes a temporary " .. role .. " into the HUD")
+                Same(label.textCalls, previousCalls, "non-mutating width probes cause no visible SetText churn")
+                Same(label.fontCalls, nil, "score measurement never inlines a font file on the visible label")
+                Near(label:GetWidth(), region:GetWidth(), "both score roles consume the same reserved width")
+                Grid(label)
+            end
+            Near(
+                region:GetRight(),
+                Widget.content:GetRight(),
+                "wide score region stays inside the content's right edge"
             )
-            Same(
-                label:GetText(),
-                previousText,
-                "measurement never writes a temporary score into the visible text region"
-            )
-            Same(label.textCalls, previousCalls, "non-mutating width probes cause no visible SetText churn")
-            Same(label.fontCalls, nil, "score measurement never inlines a font file on the visible label")
-            Near(label:GetRight(), Widget.content:GetRight(), "wide score column stays inside the content's right edge")
             Check(
-                label:GetLeft() > Widget.questionScroll:GetRight(),
+                region:GetLeft() > Widget.questionScroll:GetRight(),
                 "wide score text cannot overlap the question body"
             )
-            Grid(label)
+            Grid(region)
         end
         local function RevealStable(current, correct, elapsed, streak, expected)
             local before = Snapshot()
             local packet = Result(current, nil, nil, correct, elapsed, streak)
-            packet[7] = packet[6]
+            local total = math.max(0, tonumber(packet[6]))
+            packet[7] = tostring(total)
             before.scorePlays = before.scorePlays + 1
             local scoreState = before.regions[Widget.scoreText]
             scoreState.textCalls = (scoreState.textCalls or 0) + 1
+            local totalState = before.regions[Widget.scoreValueText]
+            if Widget.scoreValueText:GetText() ~= Quiz.L.W_SCORE_TOTAL_F:format(total) then
+                totalState.textCalls = (totalState.textCalls or 0) + 1
+            end
             SessionUI:Receive(HOST, packet)
             Widget:Refresh()
             Same(
@@ -593,27 +646,45 @@ return function(Quiz)
                 Widget.scoreText:IsShown() and Widget.scoreAnimation:IsPlaying(),
                 "large rewards use the same native score animation"
             )
+            Same(Widget.scoreValueText:IsShown(), true, "large reward keeps the permanent total visible")
+            Same(
+                Widget.scoreValueText:GetText(),
+                Quiz.L.W_SCORE_TOTAL_F:format(total),
+                "large reward updates the permanent cumulative total"
+            )
+            Near(Widget.scoreValueText:GetAlpha(), 0.35, "large reward dims the total beneath its delta")
             FitsScore(expected)
             Stable(before)
             local replay = Snapshot()
             SessionUI:Receive(HOST, packet)
             Widget:Refresh()
             Stable(replay)
+            Test.AdvanceAnimations(ANIMATION_SECONDS)
+            Same(Widget.scoreText:IsShown(), false, "large delta hides after its native animation")
+            Same(Widget.scoreValueText:IsShown(), true, "large delta completion keeps the permanent total visible")
+            Same(Widget.scoreValueText:GetAlpha(), 1, "large delta completion restores permanent total opacity")
+            Same(
+                Widget.scoreValueText:GetText(),
+                Quiz.L.W_SCORE_TOTAL_F:format(total),
+                "large delta completion retains the cumulative total"
+            )
         end
-        UI:SaveWidgetSettings({ scale = 100, font = "" })
+        SettingsPage:SaveWidgetSettings({ scale = 100, font = "" })
         Display(DISPLAYS[1])
         view = Begin(4)
-        local normalWidth = Widget.scoreText:GetWidth()
+        local normalWidth = Widget.scoreRegion:GetWidth()
         Check(
             normalWidth + EPSILON >= MIN_SCORE_WIDTH
-                and normalWidth < MIN_SCORE_WIDTH + Pixel(Widget.scoreText) + EPSILON,
+                and normalWidth < MIN_SCORE_WIDTH + Pixel(Widget.scoreRegion) + EPSILON,
             "ordinary native-font rewards retain the 44-unit minimum column rounded to pixels"
         )
         local minimumFrames, minimumLabels = #Test.frames, Test.fontStringCreations
         view = Begin(4, false, scoreRules)
-        local widened = Widget.scoreText:GetWidth()
+        local widened = Widget.scoreRegion:GetWidth()
         Check(widened > normalWidth, "large configured bounds reserve additional width before the first answer")
-        Same(Widget.scoreText:IsShown(), false, "reserving a large reward never reveals a speculative score")
+        Same(Widget.scoreText:IsShown(), false, "reserving a large reward never reveals a speculative delta")
+        Same(Widget.scoreRegion:IsShown(), true, "large-score question keeps the permanent score region visible")
+        Same(Widget.scoreValueText:GetText(), "0.0", "large-score question visibly begins at zero")
         FitsScore(2300)
         FitsScore(-1000)
         FitsScore(2200)
@@ -627,11 +698,11 @@ return function(Quiz)
         Check(library:Register("font", SCORE_WIDE_FONT, SCORE_WIDE_PATH), "wide proportional-digit font registers")
         view = Begin(4, false, scoreRules)
         local questionId, deadline = view.id, view.deadline
-        UI:SaveWidgetSettings({ font = SCORE_WIDE_FONT })
+        SettingsPage:SaveWidgetSettings({ font = SCORE_WIDE_FONT })
         Same(SessionUI.view.id, questionId, "font-driven score width reflow keeps the current question")
         Same(SessionUI.view.deadline, deadline, "font-driven score width reflow keeps the current clock")
         Check(
-            Widget.scoreText:GetWidth() > widened,
+            Widget.scoreRegion:GetWidth() > widened,
             "the same question reserves the selected font's wider glyph metrics"
         )
         Check(
@@ -642,18 +713,23 @@ return function(Quiz)
         FitsScore(1880)
         RevealStable(view, true, 32, 1, 1880)
         for _, font in ipairs({ "", SCORE_WIDE_FONT }) do
-            UI:SaveWidgetSettings({ font = font })
+            SettingsPage:SaveWidgetSettings({ font = font })
             for _, scale in ipairs({ 50, 100, 200 }) do
-                UI:SaveWidgetSettings({ scale = scale })
+                SettingsPage:SaveWidgetSettings({ scale = scale })
                 for _, display in ipairs(DISPLAYS) do
                     Display(display)
                     for _, correct in ipairs({ true, false }) do
                         view = Begin(6, true, scoreRules)
-                        local width = Widget.scoreText:GetWidth()
+                        local width = Widget.scoreRegion:GetWidth()
                         Same(
                             Widget.scoreText:IsShown(),
                             false,
-                            "question layout reserves both score signs before any click"
+                            "question layout reserves both delta signs before any click"
+                        )
+                        Same(
+                            Widget.scoreValueText:IsShown(),
+                            true,
+                            "question layout permanently shows its current total"
                         )
                         FitsScore(2300)
                         FitsScore(-1000)
@@ -663,12 +739,12 @@ return function(Quiz)
                         for _, selected in ipairs({ 1, 4, 2 }) do
                             Widget.choices[selected]:GetScript("OnClick")(Widget.choices[selected], "LeftButton")
                             Same(view.selected, selected, "large score reservation preserves normal answer changes")
-                            Near(Widget.scoreText:GetWidth(), width, "answer changes never resize the score column")
+                            Near(Widget.scoreRegion:GetWidth(), width, "answer changes never resize the score region")
                             Stable(beforeInput)
                         end
                         RevealStable(view, correct, 0, correct and 11 or 0, correct and 2300 or -1000)
                         Near(
-                            Widget.scoreText:GetWidth(),
+                            Widget.scoreRegion:GetWidth(),
                             width,
                             "revealing either score sign uses only the pre-reserved width"
                         )
@@ -683,15 +759,15 @@ return function(Quiz)
         Widget:OnDisplayChanged()
         Same(SessionUI.view.id, beforeViewport, "very narrow viewport reflow keeps the same question")
         Check(
-            Widget.scoreText:GetWidth() < Widget.scoreText:GetUnboundedStringWidthForText("+2300.0"),
+            Widget.scoreRegion:GetWidth() < Widget.scoreText:GetUnboundedStringWidthForText("+2300.0"),
             "narrow-screen case actually exercises the score-width cap"
         )
         Check(
-            Widget.scoreText:GetLeft() >= Widget.content:GetLeft() - EPSILON,
+            Widget.scoreRegion:GetLeft() >= Widget.content:GetLeft() - EPSILON,
             "a score wider than the screen stays inside the widget"
         )
         Check(
-            Widget.scoreText:GetRight() <= Widget.content:GetRight() + EPSILON,
+            Widget.scoreRegion:GetRight() <= Widget.content:GetRight() + EPSILON,
             "screen cap does not extend the score outside its right edge"
         )
         Check(
@@ -699,18 +775,32 @@ return function(Quiz)
             "screen cap leaves a usable logical question column"
         )
         Check(
-            Widget.scoreText:GetLeft() > Widget.questionScroll:GetRight(),
+            Widget.scoreRegion:GetLeft() > Widget.questionScroll:GetRight(),
             "screen-capped score retains the question gutter"
         )
-        Grid(Widget.scoreText)
-        UI:SaveWidgetSettings({ scale = 100, font = "" })
+        Grid(Widget.scoreRegion)
+        SettingsPage:SaveWidgetSettings({ scale = 100, font = "" })
         Display(DISPLAYS[1])
         view = Begin(4)
         Near(
-            Widget.scoreText:GetWidth(),
+            Widget.scoreRegion:GetWidth(),
             normalWidth,
             "returning to normal rules and native font restores the original minimum layout"
         )
+        view.score = 987654.3
+        Widget:Refresh()
+        Check(Widget.scoreRegion:GetWidth() > normalWidth, "a large cumulative total expands the permanent score lane")
+        Same(Widget.scoreValueText:GetText(), "987654.3", "large cumulative total retains every digit")
+        Check(
+            Widget.scoreRegion:GetWidth() + EPSILON
+                >= Widget.scoreValueText:GetStringWidth() + 2 * Pixel(Widget.scoreValueText),
+            "expanded score lane fits the cumulative total and shadow"
+        )
+        Same(Widget.scoreText:IsShown(), false, "cumulative total reflow does not invent a signed delta")
+        Grid(Widget.scoreRegion)
+        view.score = 0
+        Widget:Refresh()
+        Near(Widget.scoreRegion:GetWidth(), normalWidth, "smaller cumulative total restores the bounded score lane")
     end
     Same(select(1, GameFontHighlight:GetFont()), nativePath, "HUD polish never mutates Blizzard's shared font file")
     Same(select(2, GameFontHighlight:GetFont()), nativeHeight, "HUD polish never mutates Blizzard's shared font size")

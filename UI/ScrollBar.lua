@@ -1,4 +1,4 @@
-local _, Quiz = ...
+local _, Games = ...
 
 local ANIMATION_SPEED = 14
 local SETTLE_PIXELS = 0.5
@@ -11,17 +11,17 @@ local WHEEL_STEP = 60
 local BAR_GRAY = 0.72
 local TRACK_ALPHA = 0.12
 
-Quiz.ScrollBar = {}
-local ScrollBar = Quiz.ScrollBar
+Games.ScrollBar = {}
+local ScrollBar = Games.ScrollBar
 
 local function Clamp(value, maximum)
     return math.max(0, math.min(maximum, value))
 end
 
 function ScrollBar:Attach(scrollFrame, opts)
-    if scrollFrame.QuizScrollBar then
-        scrollFrame.QuizScrollBar:Refresh()
-        return scrollFrame.QuizScrollBar
+    if scrollFrame.GamesScrollBar then
+        scrollFrame.GamesScrollBar:Refresh()
+        return scrollFrame.GamesScrollBar
     end
     local rightOffset = opts and opts.rightOffset or DEFAULT_RIGHT_OFFSET
     local rightOffsetPixels = opts and opts.rightOffsetPixels or 0
@@ -44,7 +44,6 @@ function ScrollBar:Attach(scrollFrame, opts)
     bar.layoutDepth = 0
 
     function bar:GetRange()
-        -- Explicit content bounds keep transient native layout ranges from changing scrollbar visibility.
         local extent = math.max(0, scrollChild:GetHeight() - scrollFrame:GetHeight())
         local scale = scrollFrame:GetEffectiveScale()
         local range = PixelUtil.GetNearestPixelSize(extent, scale)
@@ -132,7 +131,6 @@ function ScrollBar:Attach(scrollFrame, opts)
         local current = Clamp(bar.scrollPosition, range)
         local difference = target - current
         local epsilon = PixelUtil.GetNearestPixelSize(0, scrollFrame:GetEffectiveScale(), 1) * SETTLE_PIXELS
-        -- Integrate unsnapped motion separately so small eased steps cannot stall on the rendered pixel grid.
         bar.scrollPosition = current + difference * math.min(1, elapsed * ANIMATION_SPEED)
         local position = SnapScroll(bar.scrollPosition, range)
         if math.abs(difference) < epsilon or position == target then
@@ -302,7 +300,7 @@ function ScrollBar:Attach(scrollFrame, opts)
         StopAnimation()
         StopDrag()
     end)
-    scrollFrame.QuizScrollBar = bar
+    scrollFrame.GamesScrollBar = bar
     bar:Refresh()
     return bar
 end

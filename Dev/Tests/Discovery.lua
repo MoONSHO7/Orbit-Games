@@ -1,11 +1,11 @@
-return function(Quiz)
-    local Discovery = Quiz.Discovery
-    local PREFIX = "ORBITQUIZDISC8"
-    local LOBBY = "OrbitQuizLobby"
+return function(Games)
+    local Quiz = Games.Quiz
+    local Discovery = Games.Discovery
+    local PREFIX = "ORBITGAMESDISC2"
+    local LOBBY = "OrbitGamesLobby"
     local originals = {
-        main = Quiz.Main,
+        main = Games.Main,
         session = Quiz.Session,
-        packs = Quiz.GetQuestionPacks,
         chat = C_ChatInfo,
         time = GetTime,
         realm = GetNormalizedRealmName,
@@ -15,7 +15,7 @@ return function(Quiz)
         raid = IsInRaid,
         join = JoinChannelByName,
         secret = issecretvalue,
-        suspended = Quiz.Comms.suspended,
+        suspended = Games.Comms.suspended,
         discovery = {},
     }
     for key, value in pairs(Discovery) do
@@ -45,19 +45,28 @@ return function(Quiz)
     })
     local now, restricted, eventRestricted, joined, autoJoin, channelID, metadata
     local guild, homeGroup, homeRaid, instanceGroup, registration, sendResults, sendHook
-    local sent, joins, calls
-    Quiz.Main = {
+    local sent, joins, calls, hostedAdvert
+    Games.Main = {
         IsRestricted = function()
             return restricted or eventRestricted
         end,
+        GetHostedAdvert = function()
+            if not hostedAdvert then
+                return nil
+            end
+            local playerCount = 1
+            for _ in pairs(Quiz.Session.peers) do
+                playerCount = playerCount + 1
+            end
+            hostedAdvert.playerCount = playerCount
+            hostedAdvert.joinable = playerCount < hostedAdvert.maxPlayers
+            return hostedAdvert
+        end,
+        GetHostedSessionId = function()
+            return hostedAdvert and hostedAdvert.sessionId
+        end,
     }
     Quiz.Session = { peers = {} }
-    Quiz.GetQuestionPacks = function()
-        return {
-            { id = "first", title = "First pack" },
-            { id = "unicode", title = "Élémentaire 中文" },
-        }
-    end
     GetTime = function()
         return now
     end
@@ -87,7 +96,7 @@ return function(Quiz)
         return rawequal(value, secret) or originals.secret(value)
     end
     local function Join(name, ...)
-        Check(not restricted and not eventRestricted and not Quiz.Comms.suspended, "no join during restriction")
+        Check(not restricted and not eventRestricted and not Games.Comms.suspended, "no join during restriction")
         Same(name, LOBBY, "only the dedicated lobby is auto-joined")
         Same(select("#", ...), 0, "no chat-frame attachment or password changes")
         joins[#joins + 1] = now
@@ -108,7 +117,7 @@ return function(Quiz)
         GetChannelInfoFromIdentifier = function(identifier)
             calls = calls + 1
             Check(
-                not restricted and not eventRestricted and not Quiz.Comms.suspended,
+                not restricted and not eventRestricted and not Games.Comms.suspended,
                 "no channel reads while restricted"
             )
             Same(identifier, LOBBY, "lobby metadata is resolved by name")
@@ -119,7 +128,7 @@ return function(Quiz)
             end
         end,
         SendAddonMessage = function(prefix, text, distribution, target)
-            Check(not restricted and not eventRestricted and not Quiz.Comms.suspended, "no restricted native send")
+            Check(not restricted and not eventRestricted and not Games.Comms.suspended, "no restricted native send")
             Same(prefix, PREFIX, "discovery never impersonates game transport")
             Check(#text <= 255 and not text:find("[%z\1-\31\127]"), "bounded printable packet")
             if distribution == "CHANNEL" then
@@ -149,16 +158,25 @@ return function(Quiz)
     }
     local function Fresh()
         now, restricted, eventRestricted, joined, autoJoin, channelID = 100, false, false, true, true, 7
-        metadata, sendHook = nil, nil
+        metadata, sendHook, hostedAdvert = nil, nil, nil
         guild, homeGroup, homeRaid, instanceGroup = false, false, false, false
         registration = Enum.RegisterAddonMessagePrefixResult.Success
         sent, joins, sendResults, calls = {}, {}, {}, 0
         JoinChannelByName = Join
-        Quiz.Comms.suspended = false
-        Quiz.Main.game = nil
+        Games.Comms.suspended = false
         Quiz.Session.hostSession, Quiz.Session.peers, Quiz.Session.client = nil, {}, nil
+        local saved, reason = Games.Store:SaveHostAudiences({ server = true, guild = true, party = true })
+        Check(saved or reason == "unchanged", "fresh discovery restores every host audience")
         Check(Discovery:Initialize(), "discovery initializes")
         Check(Discovery:Start(), "discovery starts")
+    end
+    local function SetAudiences(server, guildAudience, party)
+        local saved, reason = Games.Store:SaveHostAudiences({
+            server = server,
+            guild = guildAudience,
+            party = party,
+        })
+        Check(saved or reason == "unchanged", "valid host audiences save: " .. tostring(reason))
     end
     local function Tick(at)
         now = at
@@ -169,16 +187,51 @@ return function(Quiz)
             Tick(now + 1)
         end
     end
-    local function Host(session, pack)
+    local function Host(session, title, description)
         Quiz.Session.hostSession = session or "100.1"
-        Quiz.Main.game = { state = "open", settings = { packId = pack or "first", league = "League" } }
+        hostedAdvert = {
+            sessionId = Quiz.Session.hostSession,
+            gameTypeId = Quiz.id,
+            protocolVersion = 2,
+            activityId = Quiz.id,
+            activityVersion = 1,
+            title = title == "unicode" and "Élémentaire 中文" or title or "First pack",
+            description = description or "League",
+            phase = "open",
+            playerCount = 1,
+            maxPlayers = 17,
+            joinable = true,
+        }
         Check(Discovery:Advertise(), "host schedules its advertisement")
     end
-    local function Advert(session, pack, league, state, players)
-        return table.concat(
-            { "8", "A", session or "101.1", pack or "First pack", league or "League", state or "open", players or "1" },
-            "|"
-        )
+    local function Advert(
+        session,
+        title,
+        description,
+        phase,
+        playerCount,
+        gameTypeId,
+        protocolVersion,
+        activityId,
+        activityVersion,
+        maxPlayers,
+        joinable
+    )
+        return table.concat({
+            "2",
+            "A",
+            session or "101.1",
+            gameTypeId or Quiz.id,
+            protocolVersion or "2",
+            activityId or Quiz.id,
+            activityVersion or "1",
+            title or "First pack",
+            description or "League",
+            phase or "open",
+            playerCount or "1",
+            maxPlayers or "17",
+            joinable or "1",
+        }, "|")
     end
     local function Receive(text, sender, distribution, target, localID, channelName)
         return Discovery:Receive(
@@ -220,7 +273,7 @@ return function(Quiz)
     Same(#joins, 1, "automatic lobby join needs no typing")
     Same(#sent, 0, "joining waits for native membership before lookup")
     Tick(103)
-    Same(sent[1].text, "8|Q", "a lookup follows automatic join")
+    Same(sent[1].text, "2|Q", "a lookup follows automatic join")
     Same(sent[1].channel, "CHANNEL", "solo discovery uses hidden lobby traffic")
     Same(#Discovery:GetGames(), 0, "sending a lookup does not fabricate hosts")
 
@@ -268,11 +321,70 @@ return function(Quiz)
     Same(sent[1].channel, "PARTY", "home party discovery works without a lobby")
 
     Fresh()
+    guild, homeGroup, homeRaid, instanceGroup = true, true, true, true
+    Discovery.queryAt = nil
+    SetAudiences(true, false, false)
+    Host()
+    Tick(100)
+    Flush(4)
+    Same(#sent, 1, "server-only hosting emits one available advert route")
+    Same(sent[1].channel, "CHANNEL", "server hosting uses the silent realm lobby")
+    Check(sent[1].text:match("^2|A|"), "server-only traffic is the hosted advertisement")
+
+    Fresh()
+    guild, homeGroup, homeRaid, instanceGroup = true, true, true, true
+    Discovery.queryAt = nil
+    SetAudiences(false, true, false)
+    Host()
+    Tick(100)
+    Flush(4)
+    Same(#sent, 1, "guild-only hosting emits one available advert route")
+    Same(sent[1].channel, "GUILD", "guild hosting uses the native guild distribution")
+
+    Fresh()
+    guild, homeGroup, homeRaid, instanceGroup = true, true, true, true
+    Discovery.queryAt = nil
+    SetAudiences(false, false, true)
+    Host()
+    Tick(100)
+    Flush(4)
+    Same(#sent, 2, "party hosting reaches each distinct active group scope")
+    Same(sent[1].channel, "RAID", "a home raid uses the native raid distribution")
+    Same(sent[2].channel, "INSTANCE_CHAT", "an instance group receives the same party-scoped advert")
+
+    Fresh()
+    joined, homeGroup = false, true
+    Discovery.queryAt = nil
+    SetAudiences(false, false, true)
+    Host()
+    Tick(100)
+    Same(#sent, 1, "party-only hosting works without server or guild routes")
+    Same(sent[1].channel, "PARTY", "a non-raid home group uses the native party distribution")
+
+    Fresh()
+    guild, homeGroup, homeRaid, instanceGroup = true, true, true, true
+    SetAudiences(false, true, false)
+    Discovery.queryAt = 100
+    Tick(100)
+    Flush(4)
+    local queryRoutes = {}
+    for _, packet in ipairs(sent) do
+        if packet.text == "2|Q" then
+            queryRoutes[packet.channel] = true
+        end
+    end
+    Check(
+        queryRoutes.CHANNEL and queryRoutes.GUILD and queryRoutes.RAID and queryRoutes.INSTANCE_CHAT,
+        "client lookup still searches every available audience"
+    )
+    Same(queryRoutes.PARTY, nil, "broad lookup still avoids a duplicate party route while raiding")
+
+    Fresh()
     Host("100.1", "unicode")
     Quiz.Session.peers["alice"] = { name = "Alice-TestRealm" }
     Tick(100)
     Check(sent[1].text:find("Élémentaire 中文", 1, true), "pack labels retain complete UTF-8 text")
-    Check(sent[1].text:match("|open|2$"), "player count includes host and enrolled peers")
+    Check(sent[1].text:match("|open|2|17|1$"), "capacity metadata includes host and enrolled peers")
     Same(#Discovery:GetGames(), 0, "local hosting does not add an unjoinable self row")
     Same(Receive(sent[1].text, "Tester-TestRealm"), true, "self echo is handled without a fake remote game")
     Check(Discovery.lobbyConfirmed, "native self echo confirms the hidden lobby path")
@@ -284,24 +396,30 @@ return function(Quiz)
     local rows = Discovery:GetGames()
     Same(#rows, 2, "two joinable sessions are listed")
     Same(rows[1].hostName, "Alice-TestRealm", "list ordering is stable")
-    Same(rows[1].session, "101.1", "session identity is retained")
-    Same(rows[1].packName, "First pack", "pack metadata is retained")
-    Same(rows[1].league, "League", "league metadata is retained")
-    Same(rows[1].players, 1, "bounded numeric player count")
+    Same(rows[1].sessionId, "101.1", "session identity is retained")
+    Same(rows[1].gameTypeId, Quiz.id, "game type identity is retained")
+    Same(rows[1].protocolVersion, 2, "game protocol revision is retained")
+    Same(rows[1].activityId, Quiz.id, "activity identity is retained")
+    Same(rows[1].activityVersion, 1, "activity revision is retained")
+    Same(rows[1].title, "First pack", "game title is retained")
+    Same(rows[1].description, "League", "game description is retained")
+    Same(rows[1].phase, "open", "game phase is retained")
+    Same(rows[1].playerCount, 1, "bounded numeric player count")
+    Same(rows[1].maxPlayers, 17, "bounded capacity is retained")
+    Same(rows[1].joinable, true, "join availability is retained")
     Same(rows[1].expiresAt, 145, "unrefreshed hosts expire")
-    rows[1].hostName, rows[1].state = "Injected", "stopped"
+    rows[1].hostName, rows[1].phase = "Injected", "stopped"
     Same(Discovery:GetGames()[1].hostName, "Alice-TestRealm", "UI rows cannot mutate the discovery registry")
     Same(Quiz.Session.client, nil, "discovery never automatically joins a session")
     Tick(146)
     Same(#Discovery:GetGames(), 0, "offline or silent hosts disappear")
 
     Fresh()
-    Check(Receive(Advert(nil, nil, "Guild {Quiz}")), "braces remain legal in league names")
-    Same(Discovery:GetGames()[1].league, "Guild {Quiz}", "legal league metadata is not rewritten")
-    Host()
-    Quiz.Main.game.settings.league = "Guild {Quiz}"
+    Check(Receive(Advert(nil, nil, "Guild {Quiz}")), "braces remain legal in descriptions")
+    Same(Discovery:GetGames()[1].description, "Guild {Quiz}", "legal description metadata is not rewritten")
+    Host(nil, nil, "Guild {Quiz}")
     Tick(100)
-    Check(sent[1].text:find("|Guild {Quiz}|", 1, true), "host advertises every legal configured league")
+    Check(sent[1].text:find("|Guild {Quiz}|", 1, true), "host advertises every legal description")
 
     Fresh()
     Check(Receive(Advert()), "first session is discovered")
@@ -309,49 +427,96 @@ return function(Quiz)
     Check(Receive(Advert("101.2")), "a new session replaces the same host's old row")
     Same(#Discovery:GetGames(), 1, "one native host has only one browser row")
     Same(Receive(Advert()), false, "late old-session advertisements cannot undo replacement")
-    Check(Receive("8|X|101.1"), "stale withdrawal is harmless")
-    Same(Discovery:GetGames()[1].session, "101.2", "stale withdrawal does not close the replacement")
-    Check(Receive("8|X|101.2"), "matching stop withdraws a game")
+    Check(Receive("2|X|101.1"), "stale withdrawal is harmless")
+    Same(Discovery:GetGames()[1].sessionId, "101.2", "stale withdrawal does not close the replacement")
+    Check(Receive("2|X|101.2"), "matching stop withdraws a game")
     Same(#Discovery:GetGames(), 0, "stopped game disappears immediately")
     Same(Receive(Advert("101.2")), false, "queued advertisements cannot resurrect a withdrawn session")
 
     Fresh()
+    Same(
+        Discovery:Receive("ORBITQUIZDISC8", Advert(), "CHANNEL", "Alice-TestRealm", "", 0, channelID, LOBBY),
+        false,
+        "retired Orbit-Quiz discovery prefix is rejected"
+    )
+    Same(
+        Discovery:Receive("ORBITGAMESDISC1", Advert(), "CHANNEL", "Alice-TestRealm", "", 0, channelID, LOBBY),
+        false,
+        "the superseded generic discovery prefix is rejected"
+    )
     for _, packet in ipairs({
         "1|A|101.1|Pack|League|open|1",
         "2|A|101.1|Pack|League|open|1",
         "3|A|101.1|Pack|League|open|1",
-        "4|A|101.1|Pack|League|open|1",
-        "5|A|101.1|Pack|League|open|1",
-        "6|A|101.1|Pack|League|open|1",
-        "7|A|101.1|Pack|League|open|1",
-        "8|A|101.1|Pack|League|open|0",
-        "8|A|101.1|Pack|League|open|18",
-        "8|A|101.1|Pack|League|open|nan",
-        "8|A|101.1|Pack|League|open|1.5",
-        "8|A|101.1|Pack|League|finished|1",
-        "8|A|101.1|Pack|League|open|1|extra",
-        "8|A||Pack|League|open|1",
-        "8|A|101.1||League|open|1",
-        "8|A|101.1|Pack||open|1",
-        "8|A|101.1|{rt1}|League|open|1",
-        "8|A|101.1|Pack\nInjected|League|open|1",
-        "8|A|101.1|Pack\000Injected|League|open|1",
-        "8|A|101.1|Pack\127Injected|League|open|1",
+        Advert(nil, nil, nil, nil, "0"),
+        Advert(nil, nil, nil, nil, "18"),
+        Advert(nil, nil, nil, nil, "nan"),
+        Advert(nil, nil, nil, nil, "1.5"),
+        Advert(nil, nil, nil, nil, "9", nil, nil, nil, nil, "8"),
+        Advert(nil, nil, nil, nil, nil, nil, nil, nil, nil, "0"),
+        Advert(nil, nil, nil, nil, nil, nil, nil, nil, nil, "18"),
+        Advert(nil, nil, nil, nil, nil, nil, nil, nil, nil, "nan"),
+        Advert(nil, nil, nil, nil, nil, nil, nil, nil, nil, "1.5"),
+        Advert(nil, nil, nil, nil, "17", nil, nil, nil, nil, "17", "1"),
+        Advert(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, ""),
+        Advert(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "2"),
+        Advert(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, "true"),
+        Advert(nil, nil, nil, "finished"),
+        Advert(""),
+        Advert(nil, nil, nil, nil, nil, ""),
+        Advert(nil, nil, nil, nil, nil, "Quiz"),
+        Advert(nil, nil, nil, nil, nil, "unknown"),
+        Advert(nil, nil, nil, nil, nil, nil, "0"),
+        Advert(nil, nil, nil, nil, nil, nil, "1"),
+        Advert(nil, nil, nil, nil, nil, nil, "nan"),
+        Advert(nil, nil, nil, nil, nil, nil, nil, ""),
+        Advert(nil, nil, nil, nil, nil, nil, nil, "Quiz"),
+        Advert(nil, nil, nil, nil, nil, nil, nil, "{rt1}"),
+        Advert(nil, nil, nil, nil, nil, nil, nil, string.rep("a", 33)),
+        Advert(nil, nil, nil, nil, nil, nil, nil, nil, "0"),
+        Advert(nil, nil, nil, nil, nil, nil, nil, nil, "nan"),
+        Advert(nil, nil, nil, nil, nil, nil, nil, nil, "1.5"),
+        Advert(nil, ""),
+        Advert(nil, nil, ""),
+        Advert(nil, "{rt1}"),
+        Advert(nil, "Pack\nInjected"),
+        Advert(nil, "Pack\000Injected"),
+        Advert(nil, "Pack\127Injected"),
+        Advert() .. "|extra",
         Advert(string.rep("a", 65)),
         Advert(nil, string.rep("p", 65)),
         Advert(nil, nil, string.rep("l", 49)),
         string.rep("a", 256),
-        "8|J|Alice",
-        "8|Q|spoofed-target",
+        "2|J|Alice",
+        "2|Q|spoofed-target",
         "return loadstring('bad')()",
     }) do
         Same(Receive(packet), false, "malformed and unrelated wire messages reject")
     end
     Same(#Discovery:GetGames(), 0, "rejected packets allocate no hosts")
     Check(
-        Receive(Advert(string.rep("a", 64), string.rep("p", 64), string.rep("l", 48), "paused", "17")),
-        "maximum metadata sizes fit one packet"
+        Receive(
+            Advert(
+                string.rep("a", 64),
+                string.rep("p", 64),
+                string.rep("l", 48),
+                "paused",
+                "16",
+                nil,
+                nil,
+                string.rep("a", 32),
+                "2147483647"
+            )
+        ),
+        "maximum activity and user-facing metadata sizes fit one packet"
     )
+    Check(
+        Receive(Advert("full.1", "Full game", "Closed", "paused", "17", nil, nil, nil, nil, "17", "0")),
+        "a full game may remain visible without accepting joins"
+    )
+    local full = Discovery:GetGames()[1]
+    Same(full.maxPlayers, 17, "full-game capacity remains visible")
+    Same(full.joinable, false, "closed join availability remains visible")
 
     Fresh()
     for _, distribution in ipairs({
@@ -421,7 +586,7 @@ return function(Quiz)
         elseif kind == "event" then
             eventRestricted = true
         else
-            Quiz.Comms.suspended = true
+            Games.Comms.suspended = true
         end
         Same(Receive(secret), false, "restriction gates before reading the wire payload")
         Same(Discovery:Refresh(), false, "restricted lookup is refused")
@@ -430,7 +595,7 @@ return function(Quiz)
         Same(#joins, 0, "restrictions prevent channel joins")
         Same(#sent, 0, "restrictions prevent broadcasts")
         Same(calls, 0, "restrictions prevent channel metadata reads")
-        restricted, eventRestricted, Quiz.Comms.suspended = false, false, false
+        restricted, eventRestricted, Games.Comms.suspended = false, false, false
         Tick(104)
         Check(#joins > 0, "discovery recovers when restrictions clear")
     end
@@ -455,19 +620,20 @@ return function(Quiz)
     Same(Discovery:Probe("|Hbad"), false, "invalid target text is rejected")
 
     Fresh()
+    SetAudiences(true, false, false)
     Host()
-    Check(Receive("8|Q", "Alice-TestRealm", "WHISPER"), "explicit native probe is handled")
+    Check(Receive("2|Q", "Alice-TestRealm", "WHISPER"), "explicit native probe is handled")
     Same(Discovery.queueCount, 1, "one private reply is scheduled")
     for _ = 1, 20 do
-        Check(Receive("8|Q", "Alice-TestRealm", "WHISPER"), "repeated query is handled")
+        Check(Receive("2|Q", "Alice-TestRealm", "WHISPER"), "repeated query is handled")
     end
     Same(Discovery.queueCount, 1, "repeated query is coalesced")
     Tick(100)
     Same(sent[1].target, "Alice-TestRealm", "host reply goes to the actual native query sender")
-    Check(sent[1].text:match("^8|A|100.1|"), "host reply advertises only the current game")
+    Check(sent[1].text:match("^2|A|100.1|quiz|2|quiz|1|"), "host reply advertises only the current activity")
     Same(Quiz.Session.client, nil, "host-side discovery also cannot join anything")
     Fresh()
-    Same(Receive("8|Q", "Alice-TestRealm", "WHISPER"), true, "idle client quietly handles a query")
+    Same(Receive("2|Q", "Alice-TestRealm", "WHISPER"), true, "idle client quietly handles a query")
     Same(Discovery.queueCount, 0, "idle clients do not answer discovery requests")
 
     Fresh()
@@ -490,7 +656,7 @@ return function(Quiz)
     Fresh()
     Host()
     for index = 1, 100 do
-        Check(Receive("8|Q", Player(index), "WHISPER"), "native lookup flood remains harmless")
+        Check(Receive("2|Q", Player(index), "WHISPER"), "native lookup flood remains harmless")
     end
     Same(Discovery.responderCount, 32, "reply bookkeeping is bounded")
     Same(Discovery.queueCount, 32, "reply queue cannot exceed its cap")
@@ -559,31 +725,42 @@ return function(Quiz)
 
     Fresh()
     guild = true
+    Discovery.queryAt = nil
+    SetAudiences(true, false, false)
     Host()
     Tick(100)
+    Same(Discovery.hostAudiences.server, true, "the hosted session snapshots its server audience")
+    Same(Discovery.hostAudiences.guild, false, "the hosted session snapshots its omitted guild audience")
+    SetAudiences(false, true, false)
+    Check(Discovery:Advertise(), "the current host may schedule a refreshed advertisement")
+    Tick(105)
+    Same(sent[#sent].channel, "CHANNEL", "mid-session preference edits cannot change the advertised audience")
+    local sentBeforeStop = #sent
     Discovery:StopHost()
     for _, entry in pairs(Discovery.queue) do
-        Check(not entry.message:match("^8|A|"), "withdrawal removes unsent advertisements")
+        Check(not entry.message:match("^2|A|"), "withdrawal removes unsent advertisements")
     end
-    Tick(101)
-    Check(sent[#sent].text:match("^8|X|100.1$"), "stop publishes a bounded withdrawal")
+    Tick(106)
+    Check(sent[#sent].text:match("^2|X|100.1$"), "stop publishes a bounded withdrawal")
+    Same(sent[#sent].channel, "CHANNEL", "withdrawal uses the hosted session's original audience snapshot")
+    Same(Discovery.hostAudiences, nil, "stopping clears the hosted audience snapshot")
     Flush(5)
-    for index = 2, #sent do
-        Check(not sent[index].text:match("^8|A|100.1|"), "same stopped session is never readvertised")
+    for index = sentBeforeStop + 1, #sent do
+        Check(not sent[index].text:match("^2|A|100.1|"), "same stopped session is never readvertised")
     end
     Host("100.2")
     Flush(6)
     local foundReplacement = false
     for _, packet in ipairs(sent) do
-        foundReplacement = foundReplacement or packet.text:match("^8|A|100.2|") ~= nil
+        foundReplacement = foundReplacement or packet.text:match("^2|A|100.2|quiz|2|quiz|1|") ~= nil
     end
     Check(foundReplacement, "a new hosted session can advertise after stopping another")
 
-    Quiz.Main, Quiz.Session, Quiz.GetQuestionPacks = originals.main, originals.session, originals.packs
+    Games.Main, Quiz.Session = originals.main, originals.session
     C_ChatInfo, GetTime, GetNormalizedRealmName, UnitFullName =
         originals.chat, originals.time, originals.realm, originals.player
     IsInGuild, IsInGroup, IsInRaid, JoinChannelByName = originals.guild, originals.group, originals.raid, originals.join
-    issecretvalue, Quiz.Comms.suspended = originals.secret, originals.suspended
+    issecretvalue, Games.Comms.suspended = originals.secret, originals.suspended
     for key in pairs(Discovery) do
         Discovery[key] = nil
     end
