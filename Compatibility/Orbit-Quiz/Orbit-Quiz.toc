@@ -6,6 +6,6 @@
 ## Dependencies: Orbit-Games
 ## SavedVariables: OrbitQuizDB
 ## IconTexture: Interface\AddOns\Orbit-Games\Assets\Orbit.png
-## Category: Orbit UI
+## Category: |cffA78BFAOrbit Suite|r
 
 Loader.lua

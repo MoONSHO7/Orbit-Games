@@ -9,12 +9,12 @@ local BURST_SCALE = 0.8
 local DISPLAY_MODES = { { 1920, 1080, 0.71 }, { 1601, 901, 0.83 }, { 800, 600, 1.25 }, { 480, 320, 0.71 } }
 local ANCHOR_COORDINATES = { 0.1, 0.5, 0.9 }
 local SOUND_FILES = {
-    [5] = "Playback\\dominating-100.ogg",
-    [6] = "Playback\\ownage-100.ogg",
-    [7] = "Playback\\rampage-100.ogg",
-    [8] = "Playback\\wicked-sick-100.ogg",
-    [9] = "Playback\\holyshit-100.ogg",
-    [10] = "Playback\\godlike-100.ogg",
+    [5] = "dominating.mp3",
+    [6] = "ownage.mp3",
+    [7] = "rampage.mp3",
+    [8] = "wicked-sick.mp3",
+    [9] = "holyshit.mp3",
+    [10] = "godlike.mp3",
 }
 local GEOMETRY_CALLS = { "setPointCalls", "clearPointCalls", "sizeCalls", "stringHeightMeasurements" }
 

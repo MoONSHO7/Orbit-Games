@@ -16,7 +16,7 @@ Keep test fixtures and author tooling out of runtime modules and published addon
 
 [The September 2026 review](REVIEW.md) records reproduced correctness defects, cleanup and the remaining architecture recommendations.
 
-`SoundVolumes.py` builds the 10–100% Ogg variants under `Assets/Sounds/Playback`, applying a fade and silent tail at every level. The distinct runtime path invalidates WoW's cached pre-fix media; its check also rejects unsafe master or playback endpoints. `Assets/BuildCardAtlas.py` reproducibly fetches the pinned MIT playing-card source and builds the compact landscape `Assets/Cards/PlayingCards.png` plus an original primitive-drawn dealer chip; its offline `--check` verifies the committed atlas, fixed rank typography, metadata, decoration and licence without network access.
+`Assets/BuildCardAtlas.py` reproducibly fetches the pinned MIT playing-card source and builds the compact landscape `Assets/Cards/PlayingCards.png` plus an original primitive-drawn dealer chip; its offline `--check` verifies the committed atlas, fixed rank typography, metadata, decoration and licence without network access.
 
 ## Gotchas
 

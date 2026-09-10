@@ -15,11 +15,9 @@ local STREAK_SOUNDS = {
 local SoundMedia = {}
 Quiz.SoundMedia = SoundMedia
 
-function SoundMedia:GetStreakSound(streak, volume)
+function SoundMedia:GetStreakSound(streak)
     local file = STREAK_SOUNDS[math.min(streak, GODLIKE_STREAK)]
-    volume = volume or Quiz.SOUND_VOLUME_DEFAULT
-    if not file or volume == Quiz.SOUND_VOLUME_MIN then
-        return
+    if file then
+        return SOUND_DIRECTORY .. file .. ".mp3"
     end
-    return SOUND_DIRECTORY .. "Playback\\" .. file .. "-" .. volume .. ".ogg"
 end

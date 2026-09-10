@@ -1,5 +1,5 @@
 ## Interface: 120100
-## Title: Orbit-Games
+## Title: Orbit: Games
 ## Notes: Multiplayer party games for groups and guilds, including Quiz and Cards.
 ## Author: MoONSHO7
 ## Version: @project-version@
@@ -7,7 +7,7 @@
 ## SavedVariables: OrbitGamesDB
 ## OptionalDeps: LibSharedMedia-3.0, SharedMedia, SharedMedia_MyMedia, LibDataBroker-1.1, LibDBIcon-1.0
 ## IconTexture: Interface\AddOns\Orbit-Games\Assets\Orbit.png
-## Category: Orbit UI
+## Category: |cffA78BFAOrbit Suite|r
 
 Libs\LibStub\LibStub.lua
 Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua

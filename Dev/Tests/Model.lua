@@ -569,11 +569,6 @@ return function(Games)
     Check(not store:SaveWidgetSettings({ scale = 126 }), "off-step widget scale rejects")
     Check(not store:SaveWidgetSettings({ font = string.rep("x", 129) }), "oversized widget font rejects")
 
-    Same(store:GetSoundVolume(), Quiz.SOUND_VOLUME_DEFAULT, "sound receives its mode default")
-    Check(store:SaveSoundVolume(50), "supported sound volume saves")
-    Same(store:GetSoundVolume(), 50, "sound volume round-trips")
-    Check(not store:SaveSoundVolume(55), "off-step sound volume rejects")
-
     local legacy = {
         schemaVersion = 1,
         settings = {

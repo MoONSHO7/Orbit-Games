@@ -256,7 +256,6 @@ function PlaySoundFile(path, channel)
     local handle = Test.soundSequence
     Test.soundHandles[handle] = true
     local stem = path:match("([^\\]+)%.%w+$")
-    stem = stem and stem:gsub("%-%d+$", "")
     local duration = Test.soundDuration or SOUND_DURATIONS[stem] or math.huge
     Test.soundDeadlines[handle] = Test.soundClock + duration + (Test.soundDelay or 0)
     return true, handle

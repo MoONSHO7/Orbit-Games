@@ -6,13 +6,13 @@ local FONT_PATH = "Interface\\AddOns\\ToastPreviewTest\\Saved.ttf"
 local TOAST_SECONDS = 3.2
 local EPSILON = 0.000001
 local SOUND_FILES = {
-    "Playback\\dominating-100.ogg",
-    "Playback\\ownage-100.ogg",
-    "Playback\\rampage-100.ogg",
-    "Playback\\wicked-sick-100.ogg",
-    "Playback\\holyshit-100.ogg",
-    "Playback\\godlike-100.ogg",
-    "Playback\\godlike-100.ogg",
+    "dominating.mp3",
+    "ownage.mp3",
+    "rampage.mp3",
+    "wicked-sick.mp3",
+    "holyshit.mp3",
+    "godlike.mp3",
+    "godlike.mp3",
 }
 
 return function(Games, development)

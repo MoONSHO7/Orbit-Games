@@ -104,7 +104,7 @@ function Toasts:Create(parent, onDrained)
         return self
     end
     self.queue, self.queuedNames = {}, {}
-    self.volume = Quiz.Store:GetSoundVolume()
+    self.soundsEnabled = Quiz.Store:GetSoundsEnabled()
     self.onDrained = onDrained
     self.queueHead, self.queueCount = 1, 0
     self.frame = CreateFrame("Frame", nil, parent)
@@ -163,12 +163,9 @@ function Toasts:Create(parent, onDrained)
     return self
 end
 
-function Toasts:SetVolume(volume)
-    if self.volume == volume then
-        return
-    end
-    self.volume = volume
-    if volume == Quiz.SOUND_VOLUME_MIN then
+function Toasts:SetSoundsEnabled(enabled)
+    self.soundsEnabled = enabled
+    if not enabled then
         StopSoundHandle(self)
     end
 end
@@ -271,7 +268,7 @@ function Toasts:ShowNext()
     self.animation:Play()
     self.flareAnimation:Play()
     self.sweepAnimation:Play()
-    local path = Quiz.SoundMedia:GetStreakSound(event.streak, self.volume)
+    local path = self.soundsEnabled and Quiz.SoundMedia:GetStreakSound(event.streak)
     if path then
         local ok, played, handle = pcall(PlaySoundFile, path, SOUND_CHANNEL)
         self.soundHandle = ok and played and handle or nil

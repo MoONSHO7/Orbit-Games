@@ -31,7 +31,7 @@ Contain every Quiz-specific rule and transformation behind one mode boundary so 
 - Receipt ranges retain gaps for delayed results; replacing them with a highest-seen ID would discard older earned awards.
 - Archived league and 100-point standings are preservation-only compatibility data; do not restore them to commands, chat output or the Scores dropdown.
 - The HUD grows from its saved visible edge: left/right horizontal halves combine with top/down or bottom/up growth without reordering choices. While `/og` edit mode is open, only the literal question text can initiate movement; the full frame, background and answers do not drag. A native drag release saves once, then rerenders from the resolved edge without replaying confirmed feedback.
-- Feedback requires a confirmed result and independent replay identity; reconnects and UI refreshes must not replay it.
+- Feedback requires a confirmed result and independent replay identity; reconnects and UI refreshes must not replay it. `UI/SoundMedia.lua` maps milestones directly to the six original MP3s. The saved Sounds toggle preserves legacy mute preferences; loudness follows WoW SFX. Muting cancels only the current owned sound, leaving visuals and queued announcements intact.
 - Standings snapshots are host-reported, replacement-only presentation data. Duplicate, stale or conflicting revisions must never change scores, persist receipts or replay feedback.
 
 ## References

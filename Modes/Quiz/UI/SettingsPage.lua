@@ -4,7 +4,10 @@ local L = Quiz.L
 
 local SCALE_Y = 0
 local FONT_Y = -40
-local VOLUME_Y = -80
+local SOUNDS_Y = -84
+local LABEL_WIDTH = 104
+local LABEL_HEIGHT = 26
+local LABEL_Y_OFFSET = -5
 
 local SettingsPage = {}
 Quiz.SettingsPage = SettingsPage
@@ -36,25 +39,19 @@ function SettingsPage:Create(parent, layout)
     end)
     self.fontPicker = self.fontRow.Control
     layout.Place(self.fontRow, parent, 0, FONT_Y, self.width, self.fontRow.layoutHeight)
-    self.soundVolume = Quiz.Store:GetSoundVolume()
-    self.volumeSlider = Games.SettingsControls:Slider(
-        parent,
-        L.W_SOUND_VOLUME,
-        self.width,
-        self.soundVolume,
-        Quiz.SOUND_VOLUME_MIN,
-        Quiz.SOUND_VOLUME_MAX,
-        Quiz.SOUND_VOLUME_STEP,
-        function(value)
-            return L.W_SOUND_VOLUME_F:format(value)
-        end,
-        function(value)
-            if value ~= self.soundVolume then
-                self:SaveSoundVolume(value)
+    layout.Label(parent, L.W_SOUNDS, 0, SOUNDS_Y + LABEL_Y_OFFSET, LABEL_WIDTH, LABEL_HEIGHT)
+    self.sounds = layout.Dropdown(parent, "", LABEL_WIDTH, SOUNDS_Y, self.width - LABEL_WIDTH, function(_, root)
+        local function IsSelected(value)
+            return self.soundsEnabled == value
+        end
+        local function Select(value)
+            if value ~= self.soundsEnabled then
+                self:SaveSoundsEnabled(value)
             end
         end
-    )
-    layout.Place(self.volumeSlider, parent, 0, VOLUME_Y, self.width, self.volumeSlider.layoutHeight)
+        root:CreateRadio(L.W_SOUNDS_ON, IsSelected, Select, true)
+        root:CreateRadio(L.W_SOUNDS_OFF, IsSelected, Select, false)
+    end)
     self:Refresh()
 end
 
@@ -68,11 +65,11 @@ function SettingsPage:SaveWidgetSettings(settings)
     Games.UI:Refresh()
 end
 
-function SettingsPage:SaveSoundVolume(value)
-    local ok, reason = Quiz.Store:SaveSoundVolume(value)
+function SettingsPage:SaveSoundsEnabled(value)
+    local ok, reason = Quiz.Store:SaveSoundsEnabled(value)
     Games.UI.actionError = not ok and (L.errors[reason] or reason or L.W_ACTION_FAILED) or nil
     if ok then
-        Quiz.StreakToasts:SetVolume(Quiz.Store:GetSoundVolume())
+        Quiz.StreakToasts:SetSoundsEnabled(Quiz.Store:GetSoundsEnabled())
     end
     self:Refresh()
 end
@@ -87,10 +84,9 @@ function SettingsPage:Refresh()
     if self.scaleSlider.Slider.Slider:GetValue() ~= settings.scale then
         self.scaleSlider:SetValue(settings.scale)
     end
-    self.soundVolume = Quiz.Store:GetSoundVolume()
-    if self.volumeSlider.Slider.Slider:GetValue() ~= self.soundVolume then
-        self.volumeSlider:SetValue(self.soundVolume)
-    end
+    self.soundsEnabled = Quiz.Store:GetSoundsEnabled()
+    self.sounds:SetDefaultText(self.soundsEnabled and L.W_SOUNDS_ON or L.W_SOUNDS_OFF)
+    self.sounds:GenerateMenu()
     if fontChanged then
         self.widgetMediaRevision = Games.Media.revision
         self.fontPicker:SetSelection(settings.font)
@@ -99,4 +95,5 @@ end
 
 function SettingsPage:CloseMenus()
     self.fontPicker:CloseMenu()
+    self.sounds:CloseMenu()
 end

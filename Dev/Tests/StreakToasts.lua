@@ -7,12 +7,12 @@ local TEXT_GAP_PIXELS = 2
 local QUEUE_LIMIT = 32
 local DISPLAY_MODES = { { 1920, 1080, 0.71 }, { 1601, 901, 0.83 }, { 800, 600, 1.25 } }
 local SOUND_FILES = {
-    [5] = "Playback\\dominating-100.ogg",
-    [6] = "Playback\\ownage-100.ogg",
-    [7] = "Playback\\rampage-100.ogg",
-    [8] = "Playback\\wicked-sick-100.ogg",
-    [9] = "Playback\\holyshit-100.ogg",
-    [10] = "Playback\\godlike-100.ogg",
+    [5] = "dominating.mp3",
+    [6] = "ownage.mp3",
+    [7] = "rampage.mp3",
+    [8] = "wicked-sick.mp3",
+    [9] = "holyshit.mp3",
+    [10] = "godlike.mp3",
 }
 
 return function(Games)
@@ -356,17 +356,14 @@ return function(Games)
 
     event, handle = StartAudioTail()
     before = #played
-    Toasts:SetVolume(40)
-    Same(Toasts.soundHandle, handle, "nonzero volume changes leave an unfinished old-volume clip intact")
-    Same(Test.soundHandles[handle], true, "changing audible levels does not cut an audio tail")
-    Toasts:SetVolume(0)
+    Toasts:SetSoundsEnabled(false)
     Same(Test.soundHandles[handle], nil, "mute immediately stops an audio tail")
     Same(Toasts.soundHandle, nil, "muting clears ownership of the cancelled audio")
     Poll(SOUND_POLL_SECONDS)
     Same(Toasts.active.name, "AfterAudioTail-TestRealm", "muting releases the pending silent visual at the next poll")
     Same(Toasts.soundHandle, nil, "muted next milestone has no native playback")
     Same(Toasts.frame:GetScript("OnUpdate"), nil, "muting cannot leave an idle sound poll")
-    Toasts:SetVolume(100)
+    Toasts:SetSoundsEnabled(true)
     Same(#played, before, "unmuting never replays an already consumed milestone")
     Test.AdvanceAnimations(TOAST_SECONDS + EPSILON)
     Same(Toasts.active, nil, "muted audio-tail queue still drains")

@@ -148,21 +148,14 @@ def main():
         raise AssertionError("Release archives must include bundled logo and playing-card assets")
     print("Addon-list branding: Orbit UI category and bundled logo passed")
     for sound in STREAK_SOUNDS:
-        original = Path("Assets/Sounds") / sound
-        variants = [original] + [
-            original.parent / "Playback" / f"{original.stem}-{volume}.ogg"
-            for volume in range(10, 101, 10)
-        ]
-        for relative in variants:
-            path = ROOT / relative
-            if not path.is_file() or path.stat().st_size == 0:
-                raise AssertionError(f"Missing bundled streak sound: {relative}")
-            if relative.suffix == ".ogg" and not path.read_bytes().startswith(b"OggS"):
-                raise AssertionError(f"Invalid volume-variant audio: {relative}")
-            if any(fnmatchcase(parent.as_posix(), pattern)
-                   for parent in (relative, *relative.parents) for pattern in ignored):
-                raise AssertionError(f"Release archives must include streak sound: {relative}")
-    print("Streak audio: six masters and all 60 playback variants survive packaging exclusions")
+        relative = Path("Assets/Sounds") / sound
+        path = ROOT / relative
+        if not path.is_file() or path.stat().st_size == 0:
+            raise AssertionError(f"Missing bundled streak sound: {relative}")
+        if any(fnmatchcase(parent.as_posix(), pattern)
+               for parent in (relative, *relative.parents) for pattern in ignored):
+            raise AssertionError(f"Release archives must include streak sound: {relative}")
+    print("Streak audio: six original MP3s survive packaging exclusions")
     card_builder = run_path(str(ROOT / "Dev" / "Assets" / "BuildCardAtlas.py"))
     card_builder["check"]()
     if "Dev" not in ignored:

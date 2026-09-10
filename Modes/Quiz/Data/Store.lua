@@ -48,11 +48,6 @@ local function IsInteger(value, minimum, maximum)
     return IsFinite(value) and value % 1 == 0 and value >= minimum and value <= maximum
 end
 
-local function IsSoundVolume(value)
-    return IsInteger(value, Quiz.SOUND_VOLUME_MIN, Quiz.SOUND_VOLUME_MAX)
-        and (value - Quiz.SOUND_VOLUME_MIN) % Quiz.SOUND_VOLUME_STEP == 0
-end
-
 local function IsScore(value, signed)
     if not IsFinite(value) or value < (signed and -MAX_SCORE or 0) or value > MAX_SCORE then
         return false
@@ -354,6 +349,7 @@ local function MigrateLegacyScoring(saved)
         widgetPosition = saved.widgetPosition,
         widgetSettings = saved.widgetSettings,
         soundVolume = saved.soundVolume,
+        soundsEnabled = saved.soundsEnabled,
         personalScores = saved.personalScores,
     }
 end
@@ -405,9 +401,12 @@ function Store:Normalize(saved)
     if not widgetSettings then
         return nil, widgetSettingsError
     end
-    local soundVolume = saved.soundVolume == nil and Quiz.SOUND_VOLUME_DEFAULT or saved.soundVolume
-    if not IsSoundVolume(soundVolume) then
-        return nil, "invalid_sound_volume"
+    local soundsEnabled = saved.soundsEnabled
+    if soundsEnabled == nil then
+        soundsEnabled = saved.soundVolume ~= 0
+    end
+    if type(soundsEnabled) ~= "boolean" then
+        return nil, "invalid_sounds_enabled"
     end
     local personalScores, personalError = Quiz.PersonalScores:CopySaved(saved.personalScores)
     if not personalScores then
@@ -421,7 +420,7 @@ function Store:Normalize(saved)
         legacyLeagues = legacyLeagues,
         widgetPosition = widgetPosition,
         widgetSettings = widgetSettings,
-        soundVolume = soundVolume,
+        soundsEnabled = soundsEnabled,
         personalScores = personalScores,
     }
     return db
@@ -467,15 +466,15 @@ function Store:SaveWidgetSettings(settings)
     return true
 end
 
-function Store:GetSoundVolume()
-    return self.db.soundVolume
+function Store:GetSoundsEnabled()
+    return self.db.soundsEnabled
 end
 
-function Store:SaveSoundVolume(volume)
-    if not IsSoundVolume(volume) then
-        return false, "invalid_sound_volume"
+function Store:SaveSoundsEnabled(enabled)
+    if type(enabled) ~= "boolean" then
+        return false, "invalid_sounds_enabled"
     end
-    self.db.soundVolume = volume
+    self.db.soundsEnabled = enabled
     return true
 end
 
