@@ -10,7 +10,7 @@ Keep user-facing instructions separate from module maintenance contracts.
 
 ## Implementation
 
-[QUICKSTART.md](QUICKSTART.md) covers installation, the shared game browser, Quiz, Texas Hold'em, preferences, save migration and verification. [PACKS.md](PACKS.md) gives complete files for an independently distributed Quiz companion addon using `## Dependencies: Orbit-Games` and `OrbitGames.Quiz:RegisterPack`.
+[QUICKSTART.md](QUICKSTART.md) covers installation, the shared game browser, Quiz, Texas Hold'em, preferences, saved scores and verification. [PACKS.md](PACKS.md) gives complete files for an independently distributed Quiz companion addon using `## Dependencies: Orbit-Games` and `OrbitGames.Quiz:RegisterPack`.
 
 ## Gotchas
 

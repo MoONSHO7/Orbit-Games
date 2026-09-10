@@ -6,13 +6,11 @@ Orbit-Games account state, shared preferences and isolated per-game-type data.
 
 ## Purpose
 
-Keep root save validation and one-time product migration separate from mode-owned accounting and presentation.
+Keep root save validation separate from mode-owned accounting and presentation.
 
 ## Implementation
 
 `Store.lua` owns `OrbitGamesDB`. The selected mode, nonempty Host-to audience selection and minimap preferences live at the root; game-owned data lives under `modes[modeId]`. Host audiences normalize to detached `server`, `guild` and `party` booleans before every registered storage owner validates its mode data without side effects. The store binds data only after the entire root validates. The schema-7 Quiz payload is `modes.quiz`; Cards setup, table placement, counters and bounded session results live at `modes.cards`.
-
-The packaged addon named `Orbit-Quiz` exists only so WoW loads the former addon-named SavedVariables file. Orbit-Games validates `OrbitQuizDB`, copies its Quiz payload into `OrbitGamesDB.modes.quiz` once, and never rescales, merges or guesses historical rules.
 
 `Modes/Quiz/Data/PersonalScores.lua` validates Quiz receipts, keeps signed per-pack accounting and projects detached score rows whose totals floor at zero. Compressed host/session/round ranges continue to prevent duplicate credit across reloads and delayed results.
 
@@ -20,8 +18,7 @@ The packaged addon named `Orbit-Quiz` exists only so WoW loads the former addon-
 
 ## Gotchas
 
-- A physical addon rename changes WoW's SavedVariables filename; declaring the old global in the new TOC is not a migration.
-- Treat the legacy save as input until the new root and Quiz subtree both validate. A failed import must leave both untouched and retry safely.
+- Root validation rejects malformed or newer-version data before binding any mode or replacing `OrbitGamesDB`.
 - Keep pack IDs, rules keys, scoring versions, receipt identities and archive arithmetic byte-for-byte compatible.
 - Only confirmed closed Quiz results affect personal scores. WoW writes on normal logout/reload; crashes can lose recent progress.
 - The saved signed Quiz balance may be negative so wrong guesses at zero still offset later gains; public pack summaries and score rows never expose less than zero.

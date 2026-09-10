@@ -74,7 +74,6 @@ local function NormalizeModes(savedModes)
 end
 
 function Store:Initialize(saved)
-    local hasSaved = saved ~= nil and not IsEmpty(saved)
     if saved == nil or IsEmpty(saved) then
         saved = { schemaVersion = SCHEMA_VERSION }
     end
@@ -111,42 +110,10 @@ function Store:Initialize(saved)
         modes = modes,
     }
     self.db = db
-    self.hadSavedDatabase = hasSaved
-    self.importedModeData = false
     for _, gameType in ipairs(Games.GameTypes:GetAll()) do
         gameType.storage:Bind(modes[gameType.id])
     end
     return db
-end
-
-function Store:ImportMode(gameTypeId, savedMode, minimapSettings)
-    if self.hadSavedDatabase or self.importedModeData or savedMode == nil or IsEmpty(savedMode) then
-        return false, "legacy_not_needed"
-    end
-    local gameType = Games.GameTypes:Get(gameTypeId)
-    if not gameType then
-        return false, "invalid_game_type"
-    end
-    local normalized, reason = gameType.storage:Normalize(savedMode)
-    if not normalized then
-        return false, reason
-    end
-    local minimap = CopyMinimapSettings(minimapSettings)
-    if not minimap then
-        return false, "invalid_minimap_settings"
-    end
-    self.db.selectedGameType = gameTypeId
-    for key in pairs(self.db.minimap) do
-        self.db.minimap[key] = nil
-    end
-    for key, value in pairs(minimap) do
-        self.db.minimap[key] = value
-    end
-    self.db.modes[gameTypeId] = normalized
-    self.hadSavedDatabase = true
-    self.importedModeData = true
-    gameType.storage:Bind(normalized)
-    return true
 end
 
 function Store:GetSelectedGameType()

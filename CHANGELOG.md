@@ -7,9 +7,9 @@
 
 - Rename the addon and release package to Orbit-Games. Make the application shell game-type agnostic and register Quiz as the first mode under `OrbitGames.Quiz`, with `OrbitGames.Quiz:RegisterPack` as its public companion-pack entry point.
 - Move Quiz rules, model, scoring, session, persistence, UI and bundled packs under `Modes/Quiz` while keeping shared identity, transport, discovery, settings chrome, media and minimap ownership at the framework boundary.
-- Introduce generic `ORBITGAMES1` and `ORBITGAMESDISC2` protocols with immutable mode/activity routing, capacity and joinability. The former Quiz-only prefixes remain legacy contracts and are never reinterpreted.
+- Introduce generic `ORBITGAMES1` and `ORBITGAMESDISC2` protocols with immutable mode/activity routing, capacity and joinability. Ignore unknown prefixes and unsupported protocol versions.
 - Add a saved native Host-to multi-select above Game Type for Server, Guild and Party discovery. Require a nonempty selection and lock it during active sessions; filter advertisements and withdrawals while queries remain broad. Server is the best-effort silent `OrbitGamesLobby` route, Party includes party/raid/instance routes, there is no Friends/Battle.net fan-out, and Host-to does not authorize direct joins.
-- Store application data in `OrbitGamesDB`, with preserved Quiz state under `modes.quiz`. Package an `Orbit-Quiz` compatibility shim to load the old addon-named SavedVariables file and legacy companion dependencies without running a second game engine.
+- Store application data in `OrbitGamesDB`, with preserved Quiz state under `modes.quiz`. Retire the transitional addon loader and cross-addon save import so releases contain only Orbit-Games.
 - Replace player commands with `/og` and `/orbitgames`; source previews move to `/ogdev`. Keep Quiz terminology only for question, answer, pack, rules and Quiz score behavior.
 - Remove every Orbit-Games chat-frame post, including login, help, status, results and source-preview messages. Route `/og status` and unknown commands to Games, `/og packs` to Quiz Host, and `/og scores` or Cards `/og results` to the active Results page; show pack validation in the Host notice lane. Keep `/ogdev` feedback visual and silent, preserve native addon-message transport, and retain archive/legacy Quiz standings without a UI, command or chat projection.
 - Add Cards as a second game type with host-authoritative No-Limit Texas Hold'em for two to eight seats: private hole-card projections, fixed buy-in/blinds, timed legal actions, heads-up order, short all-ins, side pots, refunds, odd chips, rebuys between hands and an eight-seat table. Recover dropped action replies idempotently, version every wire projection, allow known-seat reconnects and sit disconnected peers out before the next deal.
@@ -34,10 +34,10 @@
 - Keep only the six original streak MP3s, with a saved Sounds On/Off control. Preserve existing mute preferences, remove generated volume copies and let the game's SFX setting control loudness.
 - Add animated, sound-enabled group streak toasts below the Q/A widget: Dominating at 5, Ownage at 6, Rampage at 7, Wicked Sick at 8, Holy Shit at 9 and Godlike at 10+. Announce only confirmed results, queue simultaneous players, inherit font/scale, reserve pixel-aligned space and cancel playback cleanly without replay.
 - Replace the dark toast panel with a transparent burst and masked shine. Reduce the graphic to 80% size, centered four physical pixels below its text slot. Show only a fixed-size `X in a row` beneath the player name while the shine crosses the graphic. Let confirmed voices and queues survive packet waits, pauses, restrictions and natural final-session teardown; mute and explicit cancellation stop playback immediately.
-- Add source-only `/oqdev toasts` to preview all six streak sounds and animations using sample 5â€“11 streaks. Reuse the real read-only HUD, refuse live sessions, leave scores/networking untouched and clean up automatically or with `/oqdev off`.
+- Add source-only `/ogdev toasts` to preview all six streak sounds and animations using sample 5â€“11 streaks. Reuse the real read-only HUD, refuse live sessions, leave scores/networking untouched and clean up automatically or with `/ogdev off`.
 - Add the bundled Orbit logo to the addon-list entry under the existing Orbit UI category, without an Orbit dependency.
 - Gently scroll overflowing join-card descriptions back and forth with pauses at each end; keep short text still and preserve animation progress across unrelated lobby updates.
-- Make the quiz-pack example a self-contained independent-addon starter, with its own required Orbit-Quiz dependency and authoring/distribution instructions. Include complete starter files in the guide; creating a pack needs no core checkout, contribution or file edits.
+- Make the quiz-pack example a self-contained independent-addon starter, with its own required Orbit-Games dependency and authoring/distribution instructions. Include complete starter files in the guide; creating a pack needs no core checkout, contribution or file edits.
 - Organize application, game, networking, persistence and UI into responsibility-based modules; group Warcraft Lore and source-only development tools, with guides under Docs. Keep pack IDs, protocol and saved-data schemas unchanged.
 - Consolidate localization, font-picker popup ownership and dialog controls; remove unused strings/wrappers, share feedback construction and project score rows without redundant compatibility copies.
 - Fix selected panel-button accents persisting after deselection while retaining native button fonts and handlers.
@@ -57,7 +57,7 @@
 - Place game and score list scrollbars just inside the setup window's right border. Size the reserved HUD score column from the pack's maximum rewards/penalties and chosen font before answering; keep a winner footer below the text so animations neither overlap scrolling answers nor shift the layout.
 - Replace native pushed-font handling with a one-physical-pixel answer-text press and dim, restored on release, leave, hide, disable, drag or reflow. Leave hit areas and other labels still. Stabilize right-side scrollbar visibility against transient native ranges, batch content reflows, and cancel pending scrolling when questions or score scopes change.
 - Snap owned window/HUD placement, outlines, divider joins, text insets and rendered scroll positions to the pixel grid across scale and resolution changes. Preserve native control styling, remeasure reused score text, and keep the final game-list row within its declared scroll extent.
-- Add an opt-in development game browser preview: `/oqdev games` shows 32 varied dummy hosts in the real scrolling list; `/oqdev off` restores discovery. Sample Join actions are inert, active games and saved data are unaffected, and the preview resets on reload.
+- Add an opt-in development game browser preview: `/ogdev games` shows 32 varied dummy hosts in the real scrolling list; `/ogdev off` restores discovery. Sample Join actions are inert, active games and saved data are unaffected, and the preview resets on reload.
 - Exclude the preview module and command from packager-built releases; keep the existing standalone UI styling unchanged.
 
 ## 0.8
@@ -77,14 +77,14 @@
 
 ## 0.6
 
-- Replace the generic flat `/oq` window with a standalone port of Orbit's actual Edit Mode settings dialog: housing-container shader NineSlice art, centered title, native close button, gold text tabs, and tapered dividers.
+- Replace the generic flat `/og` window with a standalone port of Orbit's actual Edit Mode settings dialog: housing-container shader NineSlice art, centered title, native close button, gold text tabs, and tapered dividers.
 - Use Orbit's native panel-button templates and tooltip-bordered text inputs, preserving pressed and disabled states. Keep the Q/A HUD unframed and use Orbit's purple edit highlight.
 - Replace generic pack menus and the cycling score selector with standalone Orbit-style arrow pickers, pooled radio rows, and thin animated scrollbars.
 - Add explicit asset, native-template, standalone-loading, and interaction regressions. Quiz/session rules, scoring, and saved data are unchanged.
 
 ## 0.5
 
-- Replace the large player window with a bare, screen-aware question widget inspired by Orbit Error Messages and Edit Mode. Move it only while `/oq` is open; active sessions have no HUD close button.
+- Replace the large player window with a bare, screen-aware question widget inspired by Orbit Error Messages and Edit Mode. Move it only while `/og` is open; active sessions have no HUD close button.
 - Discover games through hidden lobby/guild/group announcements; join or switch from the browser without entering a host name. Each player has one session, including when switching away from local hosting.
 - Accept revised answers until the deadline. A changed selection gets a new host-receipt time; retries cannot retime or restore an older selection.
 - Score correct answers as 1 plus 0.1 per whole second remaining; incorrect and unanswered questions earn 0. Preserve old 100/-50 totals and history in a separate archive through schema-4 migration.
@@ -112,7 +112,7 @@
 
 - Restrict hosting and answers to player-created custom channels, including native channel-type validation before sends.
 - Post the actual question on the first click; combine short questions into one message and preview remaining lines for longer packs.
-- Unify start, posting, next-question, and resume controls; surface native channel failures and add `/oq status` diagnostics.
+- Unify start, posting, next-question, and resume controls; surface native channel failures and add `/og status` diagnostics.
 - Preserve existing scores/counters when migrating old settings; retain historical whisper boards without enabling whisper play.
 
 ## 0.1

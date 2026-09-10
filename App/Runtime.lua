@@ -56,17 +56,6 @@ function Main:Report(reason)
     return false, self.notice
 end
 
-function Main:AbortInitialization(reason)
-    self.initialized = false
-    self.initializationError = reason
-    self:CancelTicker()
-    Games.Comms:Clear()
-    Games.Comms.initialized = false
-    Games.Discovery.started = false
-    Games.Discovery.initialized = false
-    return self:Report(reason)
-end
-
 function Main:IsRunning()
     return self:GetController():IsRunning()
 end

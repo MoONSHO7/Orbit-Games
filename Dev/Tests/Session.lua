@@ -535,7 +535,12 @@ return function(Games)
             Changed(Question(100), 7, tostring(oldDuration)),
             "protocol seven rejects a duration that contradicts the encoded pack rules"
         )
-        Unchanged(Question(100), "prior scoring protocol cannot inject an otherwise valid question", HOST, "ORBITQUIZ3")
+        Unchanged(
+            Question(100),
+            "foreign addon protocol cannot inject an otherwise valid question",
+            HOST,
+            "FOREIGNGAME1"
+        )
     end
 
     local signedClient = Joining()
@@ -1274,8 +1279,8 @@ return function(Games)
         Unchanged(ReplyFields("K", SESSION_ID, id, count + 1), "acknowledgement cannot invent an absent choice")
         local injectedSource = Changed(questionFields, #questionFields + 1, "https://example.org/answer-spoiler")
         Unchanged(injectedSource, "question does not accept a source or hidden answer extension")
-        Unchanged(questionFields, "old transport prefix cannot update this session", HOST, "ORBITQUIZ2")
-        Unchanged(questionFields, "old scoring prefix cannot update this session", HOST, "ORBITQUIZ3")
+        Unchanged(questionFields, "foreign gameplay prefix cannot update this session", HOST, "FOREIGNGAME1")
+        Unchanged(questionFields, "another addon prefix cannot update this session", HOST, "FOREIGNGAME2")
         Unchanged(
             ResultFields(id, count + 1, count, -0.5, 70, 0, 1, "", 14, count),
             "result cannot invent a correct choice"
@@ -1291,8 +1296,8 @@ return function(Games)
     local oldResult = { unpack(winnerResult, 1, 17) }
     Unchanged(oldResult, "protocol seven rejects the prior seventeen-field receipt shape")
     Unchanged({ unpack(winnerResult, 1, 19) }, "protocol seven rejects receipts missing rules and streak metadata")
-    Unchanged(winnerResult, "prior fixed-rule protocol cannot introduce current results", HOST, "ORBITQUIZ6")
-    Unchanged(winnerResult, "prior protocol cannot introduce winner metadata", HOST, "ORBITQUIZ5")
+    Unchanged(winnerResult, "foreign gameplay protocol cannot introduce current results", HOST, "FOREIGNGAME1")
+    Unchanged(winnerResult, "another addon protocol cannot introduce winner metadata", HOST, "FOREIGNGAME2")
     for _, name in ipairs({
         "",
         "Participant",
@@ -1566,9 +1571,9 @@ return function(Games)
         )
         Unchanged(
             Question(1501, nil, nil, nil, authoredRules),
-            "old fixed-rule clients cannot inject current question shapes",
+            "foreign addon clients cannot inject current question shapes",
             HOST,
-            "ORBITQUIZ6"
+            "FOREIGNGAME1"
         )
         local authoredResult = ResultFields(1500, 2, 2, 5.2, 75.2, 1, 1, EXPLANATION, 10, 4, nil, nil, authoredRules, 3)
         for _, fields in ipairs({

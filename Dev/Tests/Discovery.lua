@@ -435,9 +435,9 @@ return function(Games)
 
     Fresh()
     Same(
-        Discovery:Receive("ORBITQUIZDISC8", Advert(), "CHANNEL", "Alice-TestRealm", "", 0, channelID, LOBBY),
+        Discovery:Receive("FOREIGNDISC1", Advert(), "CHANNEL", "Alice-TestRealm", "", 0, channelID, LOBBY),
         false,
-        "retired Orbit-Quiz discovery prefix is rejected"
+        "foreign discovery prefix is rejected"
     )
     Same(
         Discovery:Receive("ORBITGAMESDISC1", Advert(), "CHANNEL", "Alice-TestRealm", "", 0, channelID, LOBBY),

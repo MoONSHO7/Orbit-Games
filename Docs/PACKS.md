@@ -45,7 +45,7 @@ The companion TOC:
 Questions.lua
 ```
 
-`## Dependencies: Orbit-Games` loads the framework before your question file. Keep it required, not optional. Do not depend on the packaged `Orbit-Quiz` migration shim for new work; that addon exists only for legacy saves and companion dependencies.
+`## Dependencies: Orbit-Games` loads the framework before your question file. Keep it required, not optional.
 
 Do not set `LoadOnDemand`: packs register during normal addon loading. To split a large pack into multiple files, list each file in **your addon's** TOC. Either register a separate pack ID from each file, or collect questions in your addon's namespace and register one combined pack from a final file.
 
@@ -86,7 +86,7 @@ Call `OrbitGames.Quiz:RegisterPack` directly. The `...` namespace passed to your
 
 ## Share and update your quiz
 
-Maintain the pack in its own repository if desired. Zip only the companion folder, with its TOC and Lua files directly inside. Do not bundle Orbit-Games or its compatibility shim; tell hosts to install Orbit-Games separately.
+Maintain the pack in its own repository if desired. Zip only the companion folder, with its TOC and Lua files directly inside. Tell hosts to install Orbit-Games separately.
 
 Only the host needs your pack; other players need Orbit-Games and receive validated Quiz data from the host. Your addon supplies content and rules while the framework owns the session, HUD and saved Quiz scores.
 

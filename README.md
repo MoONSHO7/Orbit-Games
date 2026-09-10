@@ -17,7 +17,7 @@ Install `Orbit-Games` under `World of Warcraft/_retail_/Interface/AddOns/`. Clic
     Modes/Cards/          Card foundation, Texas Hold'em, private session projections and table UI
     Modes/Quiz/           Quiz rules, packs, model, scores, session protocol and HUD
     Network/              Shared identity, transport and game discovery
-    Data/                 OrbitGamesDB validation and legacy-save migration
+    Data/                 OrbitGamesDB validation and per-mode persistence
     UI/                   Shared setup shell, controls, media and minimap launcher
     Assets/               Bundled media
     Dev/                  Source-only previews, tests and companion-addon example
@@ -29,7 +29,7 @@ Install `Orbit-Games` under `World of Warcraft/_retail_/Interface/AddOns/`. Clic
 
 `App/Init.lua` exposes `OrbitGames`; `Core/GameTypes.lua` creates its game-type registry. Shared owners discover and route a selected game; `Modes/Quiz/` owns every question, answer, rule, score and Quiz session transformation. Quiz companion addons register through `OrbitGames.Quiz:RegisterPack` and declare `## Dependencies: Orbit-Games`.
 
-`Data/Store.lua` owns `OrbitGamesDB`; mode-owned state lives below `modes`, including the preserved Quiz payload at `modes.quiz` and Cards setup/session results at `modes.cards`. Releases also package a small addon named `Orbit-Quiz` to load the former `OrbitQuizDB` SavedVariables file and satisfy older companion-addon dependencies while migration completes. It is a shim, not a second game engine.
+`Data/Store.lua` owns `OrbitGamesDB`; mode-owned state lives below `modes`, including the Quiz payload at `modes.quiz` and Cards setup/session results at `modes.cards`. Releases install one addon named `Orbit-Games`.
 
 Warcraft Lore contains 1,183 game-based questions with four to six choices. Its source-only comic archive is excluded from play and releases.
 
@@ -37,8 +37,7 @@ Warcraft Lore contains 1,183 game-based questions with four to six choices. Its 
 
 - All participants need the generic `ORBITGAMES1` / `ORBITGAMESDISC2` protocols and the selected activity version. Capacity belongs to the mode: Quiz allows 17 total players and Cards allows eight seats.
 - Cards clients receive only public state and their own hole cards until showdown, but the host owns the authoritative deck. Every Cards amount is a whole Gold value; whether a session represents real stakes is a private social agreement, and the addon never transfers, escrows or verifies gold.
-- Do not install the former full Orbit-Quiz addon beside Orbit-Games. The packaged `Orbit-Quiz` folder is only the migration/dependency shim.
-- Quiz pack IDs, question IDs, rules keys, scoring versions and receipt identities remain stable across the rename. Migration must never rescore or merge them.
+- Quiz pack IDs, question IDs, rules keys, scoring versions and receipt identities remain stable across schema upgrades. Stored results must never be rescored or merged.
 - `/og status` opens Games, `/og packs` opens Quiz Host, and `/og scores` or Cards `/og results` opens the mode's Results page. Archived Quiz league and 100-point standings remain preserved without a UI, command or chat projection.
 - Question packs are trusted executable Lua. Schema validation does not sandbox downloaded addons.
 - Native rendering, network delivery and SavedVariables disk timing still require in-game verification.

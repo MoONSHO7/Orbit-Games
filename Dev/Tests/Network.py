@@ -10,8 +10,8 @@ QUIZ_PREFIX = "ORBITGAMES1"
 DISCOVERY_PREFIX = "ORBITGAMESDISC2"
 LOBBY_NAME = "OrbitGamesLobby"
 GAME_TYPE_ID = "quiz"
-LEGACY_QUIZ_PREFIX = "ORBITQUIZ8"
-LEGACY_DISCOVERY_PREFIX = "ORBITQUIZDISC8"
+FOREIGN_GAME_PREFIX = "FOREIGNGAME1"
+FOREIGN_DISCOVERY_PREFIX = "FOREIGNDISC1"
 REVEAL_SECONDS = 3
 BOUNDARY_EPSILON = 0.001
 
@@ -249,17 +249,17 @@ def run_suite():
 
     world = World("Quizhost", "Player", "Friend")
     host, player, friend = world.nodes
-    reject_legacy = player.lua.eval("""function(gameplayPrefix, discoveryPrefix, sender)
-        local gameplay = OrbitGames.Comms:Receive(gameplayPrefix, '1|legacy-1|1|1|2:4:quiz1:J', 'WHISPER', sender)
+    reject_foreign = player.lua.eval("""function(gameplayPrefix, discoveryPrefix, sender)
+        local gameplay = OrbitGames.Comms:Receive(gameplayPrefix, '1|foreign-1|1|1|2:4:quiz1:J', 'WHISPER', sender)
         local discovery = OrbitGames.Discovery:Receive(
             discoveryPrefix, '1|Q', 'WHISPER', sender, Test.hostName .. '-' .. Test.realm, 0, 0, ''
         )
         return gameplay, discovery
     end""")
-    legacy_gameplay, legacy_discovery = reject_legacy(LEGACY_QUIZ_PREFIX, LEGACY_DISCOVERY_PREFIX, host.name)
-    equal(legacy_gameplay, False, "legacy Orbit-Quiz gameplay prefix is rejected")
-    equal(legacy_discovery, False, "legacy Orbit-Quiz discovery prefix is rejected")
-    equal(len(player.games()), 0, "legacy prefixes cannot create generic discovery state")
+    foreign_gameplay, foreign_discovery = reject_foreign(FOREIGN_GAME_PREFIX, FOREIGN_DISCOVERY_PREFIX, host.name)
+    equal(foreign_gameplay, False, "foreign gameplay prefix is rejected")
+    equal(foreign_discovery, False, "foreign discovery prefix is rejected")
+    equal(len(player.games()), 0, "foreign prefixes cannot create generic discovery state")
     settings = host.call("Store", "GetSettings")
     settings.league = "Guild {Quiz}"
     settings.duration = 20

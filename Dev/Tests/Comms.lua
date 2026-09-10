@@ -279,31 +279,9 @@ return function(Games)
     Fresh()
     local valid = Packet("valid", 1, 1, "3:4:quiz1:" .. GAME_PROTOCOL .. "1:x")
     Same(Comms:Receive("FOREIGN", valid, "WHISPER", "Alice"), false, "foreign prefix ignored")
-    Same(
-        Comms:Receive("ORBITQUIZ2", valid, "WHISPER", "Alice"),
-        false,
-        "four-choice clients cannot enter protocol seven"
-    )
-    Same(
-        Comms:Receive("ORBITQUIZ3", valid, "WHISPER", "Alice"),
-        false,
-        "old zero-penalty clients cannot enter protocol seven"
-    )
-    Same(
-        Comms:Receive("ORBITQUIZ4", valid, "WHISPER", "Alice"),
-        false,
-        "old league-score clients cannot enter protocol seven"
-    )
-    Same(
-        Comms:Receive("ORBITQUIZ5", valid, "WHISPER", "Alice"),
-        false,
-        "pre-winner clients cannot enter protocol seven"
-    )
-    Same(
-        Comms:Receive("ORBITQUIZ6", valid, "WHISPER", "Alice"),
-        false,
-        "fixed-rule clients cannot enter protocol seven"
-    )
+    for _, prefix in ipairs({ "FOREIGNGAME1", "FOREIGNGAME2" }) do
+        Same(Comms:Receive(prefix, valid, "WHISPER", "Alice"), false, "foreign versioned addon prefix ignored")
+    end
     Same(Comms:Receive(PREFIX, valid, "GUILD", "Alice"), false, "other distributions ignored")
     Same(Comms:Receive(secret, valid, "WHISPER", "Alice"), false, "secret prefix ignored")
     Same(Comms:Receive(PREFIX, secret, "WHISPER", "Alice"), false, "secret text ignored")

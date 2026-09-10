@@ -2,7 +2,7 @@
 
 ## Description
 
-Offline Lua 5.1 checks for the game-type registry, generic transport/discovery, Orbit-Quiz save migration, Cards/Texas Hold'em and Quiz.
+Offline Lua 5.1 checks for the game-type registry, generic transport/discovery, current saved-state startup/reload, Cards/Texas Hold'em and Quiz.
 
 ## Purpose
 
@@ -10,7 +10,7 @@ Exercise deterministic behavior without a World of Warcraft client. Native netwo
 
 ## Implementation
 
-Run `python Dev/Tests/run.py` from the addon folder with Python and `lupa.lua51` available. `run.py` compiles every Lua file, rejects UTF-8 BOMs and every first-party visible-chat sink in production, compatibility and source-preview scripts, checks addon-list branding, runtime paths and source/release exclusions, then loads the real TOC into a fresh mocked runtime for each suite. Runtime mocks make chat-frame writes, global printing and visible sends fail immediately while retaining instrumented native addon messages for transport/discovery checks. The icon, six original streak MP3s must survive packaging without Orbit installed.
+Run `python Dev/Tests/run.py` from the addon folder with Python and `lupa.lua51` available. `run.py` compiles Lua, rejects BOMs and first-party visible-chat sinks, checks runtime paths and the single-addon release boundary, then loads the real TOC into fresh mocked runtimes. It verifies the `Orbit: Games` title and colored `Orbit Suite` category separately from the stable `Orbit-Games` runtime identity. Current `OrbitGamesDB` fixtures cover exact source/release reload persistence, isolated mode bindings, the live minimap preference table, atomic malformed-root/mode rejection and fresh-runtime recovery. Mocks reject chat-frame writes, global printing and visible sends while instrumenting native addon messages. The icon and six original streak MP3s must survive packaging without Orbit installed.
 
 `Rules.lua` covers normalization, canonical encode/decode, detached values, allowed bounds and malformed input. `Scoring.lua` covers frozen legacy arithmetic, authored rewards/penalties, capped streak bonuses, rounding boundaries and bundled-rule long-run guessing balance for four to six choices. `Model.lua` covers author-owned clocks, answer locking, final-selection timing, per-result live-score clamping without hidden debt below zero, streak resets, shuffled/ordered cycles, finite limits and voids, plus schema-6 archive preservation, independent appearance saves and retired chat-setting cleanup. `Packs.lua` checks transactional registration, rule isolation, compatible-only All packs and the first retained validation failure reaching the Quiz Host notice; the runner repeats it for every supported locale.
 

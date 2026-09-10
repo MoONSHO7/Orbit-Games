@@ -1,6 +1,7 @@
 """Execute the real addon modules and regression suites in a Lua 5.1 runtime."""
 
 from fnmatch import fnmatchcase
+from copy import deepcopy
 import math
 from pathlib import Path
 import re
@@ -12,9 +13,9 @@ from lupa.lua51 import LuaRuntime
 ROOT = Path(__file__).resolve().parents[2]
 TESTS = ROOT / "Dev" / "Tests"
 ADDON_NAME = "Orbit-Games"
+ADDON_TITLE = "Orbit: Games"
+ADDON_CATEGORY = "|cffA78BFAOrbit Suite|r"
 ADDON_TOC = ROOT / "Orbit-Games.toc"
-COMPATIBILITY_LOADER = ROOT / "Compatibility" / "Orbit-Quiz" / "Loader.lua"
-COMPATIBILITY_TOC = ROOT / "Compatibility" / "Orbit-Quiz" / "Orbit-Quiz.toc"
 PREVIEW = "Dev/Preview.lua"
 ADDON_ICON = "Assets/Orbit.png"
 CARD_ASSETS = (
@@ -77,9 +78,7 @@ def plain(value):
     return {key: plain(child) for key, child in items}
 
 
-def runtime(
-        locale="enUS", host_name="Quizhost", realm="TestRealm", development=True, saved=None,
-        legacy_saved=None):
+def runtime(locale="enUS", host_name="Quizhost", realm="TestRealm", development=True, saved=None):
     lua = LuaRuntime(unpack_returned_tuples=True)
     load(lua, TESTS / "Stubs.lua")
     lua.globals().Test.locale = locale
@@ -87,8 +86,6 @@ def runtime(
     lua.globals().Test.realm = realm
     if saved is not None:
         lua.globals().OrbitGamesDB = lua.table_from(saved, recursive=True)
-    if legacy_saved is not None:
-        lua.globals().OrbitQuizDB = lua.table_from(legacy_saved, recursive=True)
     games = lua.table()
     for script in toc_scripts(development):
         path = ROOT / script
@@ -96,12 +93,6 @@ def runtime(
             raise AssertionError(f"Missing TOC file: {path}")
         load(lua, path, games)
     lua.globals().Test.Initialize()
-    if legacy_saved is not None:
-        minimap = games.Store.GetMinimapSettings(games.Store)
-        load(lua, COMPATIBILITY_LOADER, addon_name="Orbit-Quiz")
-        same = lua.eval("rawequal")
-        if not same(minimap, games.Store.GetMinimapSettings(games.Store)):
-            raise AssertionError("Compatibility import must retain the root minimap table used by LibDBIcon")
     return lua, games
 
 
@@ -112,12 +103,12 @@ def main():
         if line.startswith("## "):
             key, _, value = line[3:].partition(":")
             metadata[key.strip()] = value.strip()
-    if metadata.get("Title") != ADDON_NAME:
-        raise AssertionError("The primary addon identity must be Orbit-Games")
+    if metadata.get("Title") != ADDON_TITLE:
+        raise AssertionError(f"The addon-list title must be {ADDON_TITLE}")
     if metadata.get("SavedVariables") != "OrbitGamesDB":
         raise AssertionError("The primary addon must persist only the generic OrbitGamesDB root")
-    if metadata.get("Category") != "Orbit UI":
-        raise AssertionError("The addon-list category must remain Orbit UI")
+    if metadata.get("Category") != ADDON_CATEGORY:
+        raise AssertionError("The addon-list category must retain the colored Orbit Suite branding")
     icon_texture = "Interface\\AddOns\\Orbit-Games\\" + ADDON_ICON.replace("/", "\\")
     if metadata.get("IconTexture") != icon_texture:
         raise AssertionError("The addon-list icon must use Orbit-Games' bundled logo")
@@ -146,7 +137,7 @@ def main():
     required_assets = ("Assets", ADDON_ICON, "Assets/Cards", *CARD_ASSETS)
     if any(fnmatchcase(path, pattern) for path in required_assets for pattern in ignored):
         raise AssertionError("Release archives must include bundled logo and playing-card assets")
-    print("Addon-list branding: Orbit UI category and bundled logo passed")
+    print("Addon-list branding: Orbit: Games title, Orbit Suite category and bundled logo passed")
     for sound in STREAK_SOUNDS:
         relative = Path("Assets/Sounds") / sound
         path = ROOT / relative
@@ -166,18 +157,9 @@ def main():
             if not any(fnmatchcase(parent.as_posix(), pattern)
                        for parent in (relative, *relative.parents) for pattern in ignored):
                 raise AssertionError(f"Development file can enter the release archive: {relative}")
-    pkgmeta = (ROOT / ".pkgmeta").read_text(encoding="utf-8")
-    if "Orbit-Games/Compatibility/Orbit-Quiz: Orbit-Quiz" not in pkgmeta:
-        raise AssertionError("The release must move the legacy compatibility loader into a sibling addon")
-    compatibility_metadata = {}
-    for line in COMPATIBILITY_TOC.read_text(encoding="utf-8").splitlines():
-        if line.startswith("## "):
-            key, _, value = line[3:].partition(":")
-            compatibility_metadata[key.strip()] = value.strip()
-    if compatibility_metadata.get("Dependencies") != ADDON_NAME:
-        raise AssertionError("The compatibility addon must load after Orbit-Games")
-    if compatibility_metadata.get("SavedVariables") != "OrbitQuizDB":
-        raise AssertionError("The compatibility addon must load only the legacy SavedVariable")
+    if {path.relative_to(ROOT).as_posix() for path in ROOT.rglob("*.toc")
+            if "Libs" not in path.parts and "Dev" not in path.parts} != {ADDON_TOC.name}:
+        raise AssertionError("The release must contain only the Orbit-Games addon TOC")
     if any(ROOT.rglob("Chat.lua")):
         raise AssertionError("The retired visible-chat transport must not ship or load")
     identity = "Network/Identity.lua"
@@ -207,14 +189,13 @@ def main():
                for parent in (relative, *relative.parents) for pattern in ignored):
             raise AssertionError(f"Packaged TOC script is excluded by .pkgmeta: {relative}")
     first_party_scripts = [script for script in scripts if not script.startswith("Libs/")]
-    first_party_scripts.append(COMPATIBILITY_LOADER.relative_to(ROOT).as_posix())
     for script in first_party_scripts:
         source = (ROOT / script).read_text(encoding="utf-8")
         for label, pattern in VISIBLE_CHAT_PATTERNS.items():
             if pattern.search(source):
                 raise AssertionError(f"Visible-chat output {label} must not return in {script}")
     print("Release boundary: Dev is excluded and every packaged TOC script survives .pkgmeta")
-    print("Visible chat: production, compatibility and source-preview scripts contain no output sink")
+    print("Visible chat: production and source-preview scripts contain no output sink")
     for line in toc.splitlines():
         key, separator, value = line.partition(":")
         if separator and key.strip().lower() in ("## dependencies", "## requireddeps", "## optionaldeps"):
@@ -232,47 +213,59 @@ def main():
     print(f"Lua 5.1 syntax: {len(paths)} files passed")
 
     lua, games = runtime(development=False)
+    if games.addonName != ADDON_NAME:
+        raise AssertionError("The primary addon identity must remain Orbit-Games")
     if games.Print is not None:
         raise AssertionError("The packaged runtime must expose no visible-chat output helper")
     globals_ = lua.globals()
     if globals_.SLASH_ORBITGAMES1 != "/orbitgames" or globals_.SLASH_ORBITGAMES2 != "/og":
         raise AssertionError("Orbit-Games must own the generic slash-command aliases")
-    if globals_.SlashCmdList.ORBITGAMES is None or globals_.SlashCmdList.ORBITQUIZ is not None:
+    if set(globals_.SlashCmdList.keys()) != {"ORBITGAMES"}:
         raise AssertionError("Only the Orbit-Games runtime command handler may be registered")
 
     current = plain(games.Store.db)
-    legacy = plain(games.Quiz.Store.db)
-    legacy["schemaVersion"] = 6
-    legacy["minimap"] = {"minimapPos": 37.5, "hide": True, "lock": False, "showInCompartment": True}
-    migrated_lua, migrated = runtime(development=False, legacy_saved=legacy)
-    migrated_db = migrated_lua.globals().OrbitGamesDB
-    if migrated_lua.globals().OrbitQuizDB is not None:
-        raise AssertionError("Successful Orbit-Quiz migration must retire the legacy SavedVariable")
-    if not migrated.Store.importedModeData or migrated_db.schemaVersion != 1:
-        raise AssertionError("The compatibility addon must import legacy Quiz data into the generic root store")
-    if migrated_db.modes.quiz.schemaVersion != 7 or migrated_db.minimap.minimapPos != 37.5:
-        raise AssertionError("Legacy Quiz state must land in modes.quiz while minimap state remains root-owned")
-    compatibility = migrated_lua.globals().OrbitQuiz
-    legacy_api = (
-        "RegisterQuestionPack", "RegisterPack", "GetQuestionPacks", "GetPackRules", "GetQuestions", "GetPackErrors",
-    )
-    if any(compatibility[name] is None for name in legacy_api):
-        raise AssertionError("The compatibility addon must retain the complete documented legacy pack API")
+    current["selectedGameType"] = "cards"
+    current["minimap"] = {"minimapPos": 37.5, "hide": False, "lock": True, "showInCompartment": True}
+    current["hostAudiences"] = {"server": False, "guild": True, "party": False}
+    current["modes"]["quiz"]["nextQuestionId"] = 41
+    current["modes"]["quiz"]["widgetSettings"]["scale"] = 135
+    current["modes"]["cards"]["tableSettings"]["font"] = "Saved Table Font"
+    for development in (True, False):
+        restored_lua, restored = runtime(development=development, saved=current)
+        restored_db = restored_lua.globals().OrbitGamesDB
+        if plain(restored_db) != current:
+            raise AssertionError("Reload must preserve root preferences and independent mode state exactly")
+        same = restored_lua.eval("rawequal")
+        if not same(restored.Store.db, restored_db) or not same(restored_lua.globals().OrbitGames, restored):
+            raise AssertionError("The current addon namespace and store must own the live SavedVariables root")
+        if not same(restored.Quiz.Store.db, restored_db.modes.quiz) or not same(restored.Cards.Store.db, restored_db.modes.cards):
+            raise AssertionError("Every current mode must bind its own restored subtree")
+        icons, _ = restored_lua.globals().LibStub.GetLibrary(restored_lua.globals().LibStub, "LibDBIcon-1.0")
+        button = icons.GetMinimapButton(icons, ADDON_NAME)
+        if not same(button.db, restored_db.minimap):
+            raise AssertionError("The restored minimap preferences must remain the library's live table")
+        if not restored.Main.initialized or restored.Main.activeGameTypeId != "cards":
+            raise AssertionError("Startup must initialize the saved current game type")
+        if restored.Quiz.Controller.game is not None or restored.Cards.Controller.game is not None:
+            raise AssertionError("Reload must not revive a live session from persisted mode state")
 
-    invalid_legacy = dict(legacy)
-    invalid_legacy["schemaVersion"] = 999
-    failed_lua, failed = runtime(development=False, legacy_saved=invalid_legacy)
-    if failed_lua.globals().OrbitGamesDB is not None or failed_lua.globals().OrbitQuizDB is None:
-        raise AssertionError("A failed legacy import must remain retryable without replacing the old SavedVariable")
-    if failed.Main.initialized or failed.Comms.initialized or failed.Discovery.initialized:
-        raise AssertionError("A failed legacy import must disable the partially initialized new runtime")
-
-    existing_lua, existing = runtime(development=False, saved=current, legacy_saved=legacy)
-    if existing_lua.globals().OrbitQuizDB is not None or existing.Store.importedModeData:
-        raise AssertionError("An existing Orbit-Games database must win and retire redundant legacy input")
-    if plain(existing_lua.globals().OrbitGamesDB) != current:
-        raise AssertionError("Redundant legacy input must not mutate an existing Orbit-Games database")
-    print("Compatibility: legacy API, atomic migration, retry safety and new-database precedence passed")
+    invalid_roots = [deepcopy(current), deepcopy(current)]
+    invalid_roots[0]["schemaVersion"] = 999
+    invalid_roots[1]["modes"]["cards"]["schemaVersion"] = 999
+    for invalid in invalid_roots:
+        failed_lua, failed = runtime(development=False, saved=invalid)
+        if plain(failed_lua.globals().OrbitGamesDB) != invalid:
+            raise AssertionError("Rejected saved-state startup must preserve its original input for recovery")
+        if failed.Store.db is not None or failed.Quiz.Store.db is not None or failed.Cards.Store.db is not None:
+            raise AssertionError("Rejected root or mode data must not bind a partial live database")
+        if failed.Main.initialized or failed.Comms.initialized or failed.Discovery.initialized:
+            raise AssertionError("Rejected saved-state startup must not start communication or discovery")
+        if failed.Main.initializationError is None:
+            raise AssertionError("Rejected saved state must retain an explicit initialization error")
+    recovered_lua, recovered = runtime(development=False, saved=current)
+    if not recovered.Main.initialized or plain(recovered_lua.globals().OrbitGamesDB) != current:
+        raise AssertionError("Corrected current saved state must initialize successfully in a fresh runtime")
+    print("SavedVariables: current root/mode reload, live minimap binding and atomic startup rejection passed")
 
     total = 0
     for suite in ("Rules.lua", "Scoring.lua", "Model.lua", "CardsEngine.lua", "CardsIntegration.lua", "CardsUI.lua", "PersonalScores.lua", "Packs.lua", "Comms.lua", "Runtime.lua", "Session.lua", "HostAudiences.lua", "Discovery.lua", "Scores.lua", "Interface.lua", "Appearance.lua", "WidgetPosition.lua", "SoundSettings.lua", "VisualStability.lua", "HUDPolish.lua", "ScrollingLabels.lua", "StreakToasts.lua", "HUDStreaks.lua", "Lore.lua"):

@@ -16,7 +16,7 @@ Every push to `main` can publish the tested commit without a manual source-versi
 
 `release.yml` revalidates the tagged SHA, ensures it belongs to `main`, stamps `Games.version` in `App/Init.lua` only in the runner checkout, then packages Orbit-Games for CurseForge project `1676376` and a GitHub prerelease.
 
-`.pkgmeta` names the main package and includes the small `Orbit-Quiz` compatibility addon needed to load the old addon-named SavedVariables file and satisfy legacy Quiz-pack dependencies during migration. Development files, tests and the comic archive remain excluded.
+`.pkgmeta` packages the single `Orbit-Games` addon. Development files, tests and the comic archive remain excluded.
 
 `CURSE_API_KEY` becomes `CF_API_KEY` only for packaging. The job's write-scoped `GITHUB_TOKEN` becomes `GITHUB_OAUTH` for release assets.
 
@@ -26,7 +26,6 @@ Every push to `main` can publish the tested commit without a manual source-versi
 - Tag and package jobs use separate non-cancelling `orbit-games-release-*` queues.
 - A failed check creates no tag. A failed package after tagging should be rerun from Release AddOn.
 - Only strict `MAJOR.MINOR-alpha` tags publish. Stable and beta channels require an explicit workflow policy change.
-- The compatibility addon must contain no second runtime or current protocol implementation.
 - Local validation does not upload or prove repository-secret permissions.
 
 ## References

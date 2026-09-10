@@ -1,8 +1,5 @@
 package-as: Orbit-Games
 
-move-folders:
-    Orbit-Games/Compatibility/Orbit-Quiz: Orbit-Quiz
-
 externals:
     Libs/LibStub:
         url: https://github.com/wowace-clone/LibStub

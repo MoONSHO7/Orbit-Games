@@ -24,7 +24,7 @@ Move game-independent routing below registered game types while keeping each mod
 
 - All players need discovery protocol 2, the registered Quiz game protocol 2 and the selected game type. Quiz supports the host plus 16 remote players; other activities advertise their own capacity.
 - Game/activity IDs and versions are wire contracts. Never change a payload shape beneath an existing pair; bump the applicable protocol instead.
-- The former `ORBITQUIZ8` / `ORBITQUIZDISC8` prefixes are legacy Quiz contracts and are never reinterpreted as generic messages.
+- Unknown addon-message prefixes and unsupported protocol versions are ignored; never reinterpret them as current messages.
 - Server is best-effort discovery among clients joined to `OrbitGamesLobby`, not a guaranteed realm-wide broadcast. Guild and group visibility still follow native membership and cross-realm addon-whisper rules.
 - WoW exposes no native Friends/Battle.net addon-message multicast, so there is no Friends audience or Battle.net relay.
 - Native addon messages and the shared lobby are invisible transport. Do not add a player-chat or chat-frame fallback when a route fails.

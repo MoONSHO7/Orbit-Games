@@ -45,7 +45,6 @@ The sample rules match Warcraft Lore, including its capped consecutive-correct b
 - Questions require stable IDs and four to six distinct choices.
 - Change `rules.version` when authored rules change. Distinct normalized rules keep separate history even if the revision is reused.
 - Restart WoW to discover a new addon folder. Existing listed Lua edits need only `/reload` and a new Quiz game.
-- Older packs depending on `Orbit-Quiz` load through the packaged compatibility shim, but new packs must depend directly on Orbit-Games.
 
 ## References
 
